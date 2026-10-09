@@ -20,10 +20,29 @@ interface ListeningRepository {
 
     fun observeStatus(): Flow<ListeningStatus>
 
-    /** Sets the phrase. Changing it clears enrolment — the old template no longer applies. */
+    /**
+     * Sets the phrase.
+     *
+     * Does not clear the voiceprint: that describes her voice, not this phrase, so a
+     * changed wake word keeps the voice matching that was already enrolled.
+     */
     suspend fun setWakeWordPhrase(phrase: String)
 
-    /** Records one enrolment take. [WakeWord.MIN_TAKES] are needed before it will fire. */
+    /**
+     * Whether the keyword model can express [phrase].
+     *
+     * The spotter works from sub-word pieces, and a phrase containing pieces it does not
+     * have cannot be registered. Screens check this before offering to save, because the
+     * failure is otherwise invisible — the phrase saves, looks set up, and never fires.
+     */
+    suspend fun canUseWakePhrase(phrase: String): Boolean
+
+    /**
+     * Records that one enrolment take was captured.
+     *
+     * Only the count. The voiceprint itself is built by `VoiceEnroller`, which owns the
+     * microphone and the embedding model; this keeps the repository to persistence.
+     */
     suspend fun addEnrolmentTake()
 
     /** Discards enrolment so the user can start the takes again. */
@@ -34,16 +53,17 @@ interface ListeningRepository {
     suspend fun setSensitivity(sensitivity: ListeningSensitivity)
 
     /**
-     * Tells the repository what the system currently grants.
+     * Re-reads the permissions from the system.
      *
-     * Permission state is owned by the platform, not by us, so it is pushed in from the
-     * UI layer after a permission check rather than guessed at here.
+     * A nudge, not a setter: the repository owns a [PermissionProbe] and asks the
+     * platform itself. Callers used to push a snapshot in, which meant two screens could
+     * disagree and a fresh process assumed nothing was granted until some UI corrected
+     * it — so the home screen urged the user to grant what she had granted in onboarding.
+     *
+     * Call it after returning from a permission dialog or system settings, where the
+     * answer changes without anything observable happening in app state.
      */
-    suspend fun updatePermissions(
-        microphone: Boolean,
-        notifications: Boolean,
-        batteryExempt: Boolean,
-    )
+    suspend fun refreshPermissions()
 
     /** Reports whether a keyword model is installed and loaded. */
     suspend fun setDetectorReady(ready: Boolean)

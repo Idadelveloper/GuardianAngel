@@ -3,7 +3,7 @@ package com.example.guardianangel.di
 import android.app.Activity
 import android.content.Context
 import android.util.Log
-import com.example.guardianangel.audio.BpeTokenizer
+import com.example.guardianangel.audio.SentencePieceTokenizer
 import com.example.guardianangel.data.FakeActivityRepository
 import com.example.guardianangel.data.FakeGuardianRepository
 import com.example.guardianangel.data.FakeRouteRepository
@@ -15,7 +15,10 @@ import com.example.guardianangel.data.local.GuardianDatabase
 import com.example.guardianangel.data.local.RoomAccountRepository
 import com.example.guardianangel.data.local.RoomCodewordRepository
 import com.example.guardianangel.data.local.RoomContactsRepository
+import com.example.guardianangel.data.platform.AndroidPermissionProbe
 import com.example.guardianangel.data.local.RoomListeningRepository
+import com.example.guardianangel.domain.repository.PermissionProbe
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
 import com.example.guardianangel.data.local.RoomVoiceProfileStore
 import com.example.guardianangel.data.local.RoomWakeWordStore
 import com.example.guardianangel.data.sync.CloudSync
@@ -62,10 +65,10 @@ class DatabaseAppContainer(
      * tokens at save time. Null when no model is installed; the wake word is still
      * stored, just without tokens, and the spotter reports itself unavailable.
      */
-    private val tokenizer: BpeTokenizer? = runCatching {
-        BpeTokenizer.fromAssets(
+    private val tokenizer: SentencePieceTokenizer? = runCatching {
+        SentencePieceTokenizer.fromAssets(
             context.assets,
-            "sherpa-onnx-kws-zipformer-gigaspeech/tokens.txt",
+            "sherpa-onnx-kws-zipformer-gigaspeech/bpe.model",
         )
     }.onFailure { Log.i(TAG, "No keyword vocabulary; wake phrases will not be tokenised") }
         .getOrNull()
@@ -83,7 +86,8 @@ class DatabaseAppContainer(
         tokenizer = tokenizer,
     )
 
-    val voiceProfileStore = RoomVoiceProfileStore(database.voiceProfileDao(), currentUser)
+    override val voiceProfileRepository: VoiceProfileRepository =
+        RoomVoiceProfileStore(database.voiceProfileDao(), currentUser)
 
     /** Null Firestore when no project is configured; CloudSync reports Unavailable. */
     override val cloudSync = CloudSync(
@@ -97,8 +101,10 @@ class DatabaseAppContainer(
 
     override suspend fun currentUserId(): String = currentUser.requireId()
 
+    override val permissionProbe: PermissionProbe = AndroidPermissionProbe(context)
+
     override val listeningRepository: ListeningRepository =
-        RoomListeningRepository(wakeWordStore)
+        RoomListeningRepository(wakeWordStore, permissionProbe)
 
     override val accountRepository: AccountRepository = RoomAccountRepository(
         userDao = database.userDao(),

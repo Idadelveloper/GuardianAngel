@@ -51,6 +51,20 @@ class SherpaTranscriber(
     private var recognizer: OfflineRecognizer? = null
     private var vad: Vad? = null
 
+    /**
+     * Guards every use of the native handles.
+     *
+     * Not defensive clutter — the absence of this caused a native crash on the disarm
+     * path. `finish()` reads `recognizer` into a local and then decodes, which can take
+     * hundreds of milliseconds; if `close()` released the recognizer during that window,
+     * the local pointed at freed memory and the process died inside `decodeSegment`.
+     * A user ending a walk is not an edge case.
+     *
+     * Decoding holds the lock, so [close] can wait for a segment in flight. That is the
+     * right trade: the alternative is the crash.
+     */
+    private val nativeLock = Any()
+
     /** Running sample offset, so chunks carry real timestamps rather than indices. */
     private var samplesConsumed: Long = 0
 
@@ -117,7 +131,7 @@ class SherpaTranscriber(
      * Decoding happens inline on the caller's thread, which must not be the main one —
      * the listening service calls this from its capture coroutine on [Dispatchers.Default].
      */
-    override fun accept(samples: FloatArray) {
+    override fun accept(samples: FloatArray) = synchronized(nativeLock) {
         val detector = vad ?: return
         val model = recognizer ?: return
 
@@ -132,15 +146,17 @@ class SherpaTranscriber(
     }
 
     override suspend fun finish() = withContext(Dispatchers.Default) {
-        val detector = vad ?: return@withContext
-        val model = recognizer ?: return@withContext
-        // Flush pushes any trailing speech out of the VAD even without a closing pause,
-        // so a session that ends mid-sentence still transcribes what was said.
-        detector.flush()
-        while (!detector.empty()) {
-            val segment = detector.front()
-            decodeSegment(model, segment.samples, segment.start.toLong())
-            detector.pop()
+        synchronized(nativeLock) {
+            val detector = vad ?: return@synchronized
+            val model = recognizer ?: return@synchronized
+            // Flush pushes trailing speech out of the VAD even without a closing pause,
+            // so a session ending mid-sentence still transcribes what was said.
+            detector.flush()
+            while (!detector.empty()) {
+                val segment = detector.front()
+                decodeSegment(model, segment.samples, segment.start.toLong())
+                detector.pop()
+            }
         }
     }
 
@@ -170,7 +186,7 @@ class SherpaTranscriber(
         }
     }
 
-    override fun close() {
+    override fun close() = synchronized(nativeLock) {
         recognizer?.release()
         recognizer = null
         vad?.release()

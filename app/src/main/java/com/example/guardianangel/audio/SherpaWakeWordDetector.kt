@@ -52,7 +52,7 @@ class SherpaWakeWordDetector(
 ) {
     private var spotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
-    private var tokenizer: BpeTokenizer? = null
+    private var tokenizer: SentencePieceTokenizer? = null
 
     val isReady: Boolean get() = spotter != null
 
@@ -88,7 +88,7 @@ class SherpaWakeWordDetector(
                 keywordsThreshold = keywordsThreshold,
             )
             spotter = KeywordSpotter(context.assets, config)
-            tokenizer = BpeTokenizer.fromAssets(context.assets, "$MODEL_DIR/tokens.txt")
+            tokenizer = SentencePieceTokenizer.fromAssets(context.assets, "$MODEL_DIR/bpe.model")
             Log.i(TAG, "Keyword spotter loaded")
             true
         } catch (e: Exception) {

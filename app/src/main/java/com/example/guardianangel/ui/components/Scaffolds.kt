@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.example.guardianangel.ui.icons.GuardianIcons
 import com.example.guardianangel.ui.theme.GuardianTheme
@@ -183,6 +184,15 @@ fun GuardianWizardScaffold(
     onCta: () -> Unit,
     modifier: Modifier = Modifier,
     ctaEnabled: Boolean = true,
+    /**
+     * Label for the skip link under the primary button. Null hides it.
+     *
+     * Offered as a quiet text link rather than a second button because skipping should
+     * be possible without being the obvious choice: every step here makes something
+     * work, and a step skipped is a feature that stays off.
+     */
+    skipLabel: String? = null,
+    onSkip: (() -> Unit)? = null,
     footer: @Composable (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -281,6 +291,20 @@ fun GuardianWizardScaffold(
                     .fillMaxWidth()
                     .widthIn(max = 480.dp),
             )
+            if (skipLabel != null && onSkip != null) {
+                Spacer(Modifier.height(GuardianTheme.spacing.xs))
+                Text(
+                    text = skipLabel,
+                    style = GuardianTheme.type.labelMd,
+                    color = GuardianTheme.materialColors.onSurfaceVariant,
+                    modifier = Modifier
+                        .clip(GuardianTheme.shapes.sm)
+                        .clickable(role = Role.Button, onClick = onSkip)
+                        // A 48 dp target: a skip link that is hard to hit is a trap, not
+                        // a nudge.
+                        .padding(horizontal = GuardianTheme.spacing.md, vertical = 14.dp),
+                )
+            }
             if (footer != null) {
                 Spacer(Modifier.height(GuardianTheme.spacing.sm))
                 footer()

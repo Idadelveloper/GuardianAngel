@@ -31,6 +31,11 @@ package com.example.guardianangel.domain.model
  * voiceprint that [requireVoiceMatch] checks, so somebody *else* saying the phrase
  * cannot start a recording on her phone. Without samples that check simply cannot run,
  * which is why it degrades to off rather than blocking.
+ *
+ * Note that [requireVoiceMatch] is a *request*, not the outcome. The listening service
+ * gates on the voiceprint only when it is good enough to trust — see
+ * `VoiceProfile.isUsable` — because gating on a bad voiceprint does not keep a stranger
+ * out, it stops Angel waking for the person she belongs to.
  */
 data class WakeWord(
     val phrase: String,
@@ -44,13 +49,16 @@ data class WakeWord(
     /** Ready to listen. A phrase is enough. */
     val isEnrolled: Boolean get() = phrase.isNotBlank()
 
-    /** Enough samples for the voiceprint check to be meaningful. */
-    val canMatchVoice: Boolean get() = voiceSamples >= RECOMMENDED_SAMPLES
-
-    /** True when the user asked for voice matching but has not recorded enough for it. */
-    val voiceMatchUnavailable: Boolean get() = requireVoiceMatch && !canMatchVoice
-
     companion object {
+        /**
+         * Takes to aim for, for the progress dots during enrolment.
+         *
+         * A target, not a threshold. Whether voice matching can actually run is decided
+         * by `VoiceProfile.isUsable` — how well the recorded speech *agreed with itself*,
+         * which is the thing that determines whether the comparison means anything. A
+         * count was the old rule and a bad one: three takes in a noisy kitchen make a
+         * voiceprint that rejects its owner.
+         */
         const val RECOMMENDED_SAMPLES = 3
     }
 }

@@ -23,7 +23,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -34,9 +33,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.guardianangel.audio.BpeTokenizer
+import com.example.guardianangel.audio.SentencePieceTokenizer
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
+import com.example.guardianangel.ui.voice.VoiceEnrolmentCard
+import com.example.guardianangel.ui.voice.VoiceEnrolmentUiState
+import com.example.guardianangel.ui.voice.rememberVoiceEnrolment
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianTextField
 import com.example.guardianangel.ui.components.GuardianWizardScaffold
@@ -68,47 +71,66 @@ import kotlinx.coroutines.launch
 @Composable
 fun WakeWordRoute(
     repository: ListeningRepository,
+    voiceProfiles: VoiceProfileRepository,
     onBack: () -> Unit,
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val enrolment = rememberVoiceEnrolment(repository, voiceProfiles)
+    var phrase by remember { mutableStateOf("") }
+    var isUsable by remember { mutableStateOf(true) }
+
+    // Debounced so the warning does not flicker on every keystroke mid-word.
+    LaunchedEffect(phrase) {
+        if (phrase.isBlank()) {
+            isUsable = true
+            return@LaunchedEffect
+        }
+        delay(350)
+        isUsable = repository.canUseWakePhrase(phrase.trim())
+    }
+
     WakeWordScreen(
         modifier = modifier,
+        enrolment = enrolment.state,
+        phrase = phrase,
+        onPhraseChange = { phrase = it },
+        isPhraseUsable = isUsable,
         onBack = onBack,
-        onSave = { phrase, takes ->
+        onRecordTake = enrolment.controller::recordTake,
+        onResetTakes = enrolment.controller::reset,
+        onSave = { phrase ->
             scope.launch {
                 repository.setWakeWordPhrase(phrase)
-                repeat(takes) { repository.addEnrolmentTake() }
                 onContinue()
             }
         },
+        // Skipping is allowed, and stated plainly rather than hidden: a wake word set
+        // later works just as well. What does not work is hands-free activation without
+        // one, which is why the home screen keeps offering it until it is set.
+        onSkip = onContinue,
     )
 }
 
 @Composable
 fun WakeWordScreen(
     onBack: () -> Unit,
-    onSave: (phrase: String, takes: Int) -> Unit,
+    onSave: (phrase: String) -> Unit,
+    onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    phrase: String = "",
+    onPhraseChange: (String) -> Unit = {},
+    /** False when the model cannot express the phrase, so saving it would be a lie. */
+    isPhraseUsable: Boolean = true,
+    enrolment: VoiceEnrolmentUiState = VoiceEnrolmentUiState(),
+    onRecordTake: () -> Unit = {},
+    onResetTakes: () -> Unit = {},
 ) {
-    var phrase by remember { mutableStateOf("") }
-    var takes by remember { mutableIntStateOf(0) }
-    var isRecordingTake by remember { mutableStateOf(false) }
-
-    // Each take is a short capture. The real implementation hands the window to the
-    // keyword spotter and averages the embeddings; here it just advances the counter.
-    LaunchedEffect(isRecordingTake) {
-        if (!isRecordingTake) return@LaunchedEffect
-        delay(1600)
-        takes++
-        isRecordingTake = false
-    }
-
     // Typing the phrase is enough. The spotter is open-vocabulary, so there is nothing
-    // standing between setting a wake word and being protected by it.
-    val canContinue = phrase.isNotBlank()
-    val enoughSamples = takes >= WakeWord.RECOMMENDED_SAMPLES
+    // standing between setting a wake word and being protected by it — as long as the
+    // model can actually express it.
+    val canContinue = phrase.isNotBlank() && isPhraseUsable
 
     GuardianWizardScaffold(
         modifier = modifier,
@@ -116,8 +138,10 @@ fun WakeWordScreen(
         progress = 0.8f,
         onBack = onBack,
         ctaLabel = "Save wake word",
-        onCta = { onSave(phrase.trim(), takes) },
+        onCta = { onSave(phrase.trim()) },
         ctaEnabled = canContinue,
+        skipLabel = "Set this up later",
+        onSkip = onSkip,
     ) {
         AngelSays(
             message = "Pick one phrase that wakes me up. Say it and I start recording — " +
@@ -153,17 +177,21 @@ fun WakeWordScreen(
         GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
             GuardianTextField(
                 value = phrase,
-                onValueChange = {
-                    phrase = it
-                    // The recorded takes belong to the old phrase.
-                    if (takes > 0) takes = 0
-                },
+                onValueChange = onPhraseChange,
+                isError = phrase.isNotBlank() && !isPhraseUsable,
                 label = "Your wake word",
                 placeholder = "e.g. hey angel",
                 leadingIcon = GuardianIcons.Waveform,
-                supportingText = "Two or three syllables works best. Pick something you " +
-                    "wouldn't say by accident mid-conversation — try " +
-                    BpeTokenizer.CURATED_PHRASES.take(3).joinToString(", ") { "\"$it\"" } + ".",
+                supportingText = if (phrase.isNotBlank() && !isPhraseUsable) {
+                    "I can't pronounce that one — try ordinary words, or one of " +
+                        SentencePieceTokenizer.CURATED_PHRASES.take(3)
+                            .joinToString(", ") { "\"$it\"" } + "."
+                } else {
+                    "Two or three syllables works best. Pick something you wouldn't say " +
+                        "by accident mid-conversation — try " +
+                        SentencePieceTokenizer.CURATED_PHRASES.take(3)
+                            .joinToString(", ") { "\"$it\"" } + "."
+                },
                 modifier = Modifier.fillMaxWidth(),
             )
 
@@ -173,7 +201,7 @@ fun WakeWordScreen(
         // already knows it — they teach her *your voice*, so a stranger saying it cannot
         // start a recording. Making this a gate would add a minute of setup for a
         // protection that is worth having but not worth delaying everything else for.
-        if (phrase.isNotBlank()) {
+        if (phrase.isNotBlank() && enrolment.isAvailable) {
             GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -193,41 +221,12 @@ fun WakeWordScreen(
                 )
                 Spacer(Modifier.height(GuardianTheme.spacing.md))
 
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    TakeDots(taken = takes, total = WakeWord.RECOMMENDED_SAMPLES)
-                    Spacer(Modifier.height(GuardianTheme.spacing.md))
-                    RecordTakeButton(
-                        isRecording = isRecordingTake,
-                        enabled = !enoughSamples,
-                        onClick = { isRecordingTake = true },
-                    )
-                    Spacer(Modifier.height(GuardianTheme.spacing.sm))
-                    Text(
-                        text = when {
-                            isRecordingTake -> "Listening…"
-                            enoughSamples -> "Got it — I'll know your voice."
-                            takes > 0 -> "Once more, in your normal voice."
-                            else -> "Tap and say \"${phrase.trim()}\" — or skip for now."
-                        },
-                        style = GuardianTheme.type.bodySm,
-                        color = GuardianTheme.materialColors.onSurfaceVariant,
-                    )
-                    if (takes > 0 && !enoughSamples) {
-                        Spacer(Modifier.height(GuardianTheme.spacing.xs))
-                        Text(
-                            text = "Start over",
-                            style = GuardianTheme.type.labelSm,
-                            color = GuardianTheme.materialColors.primary,
-                            modifier = Modifier
-                                .clip(GuardianTheme.shapes.sm)
-                                .clickable { takes = 0 }
-                                .padding(horizontal = 6.dp, vertical = 4.dp),
-                        )
-                    }
-                }
+                VoiceEnrolmentCard(
+                    state = enrolment,
+                    phrase = phrase.trim(),
+                    onRecordTake = onRecordTake,
+                    onReset = onResetTakes,
+                )
             }
         }
 
@@ -293,77 +292,8 @@ private fun ExplainerRow(
     }
 }
 
-/** Progress through the enrolment takes. */
-@Composable
-private fun TakeDots(taken: Int, total: Int, modifier: Modifier = Modifier) {
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
-    ) {
-        repeat(total) { index ->
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (index < taken) {
-                            GuardianTheme.colors.accentSoft
-                        } else {
-                            GuardianTheme.materialColors.surfaceContainerHigh
-                        }
-                    ),
-            )
-        }
-    }
-}
-
-@Composable
-private fun RecordTakeButton(
-    isRecording: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
-) {
-    val transition = rememberInfiniteTransition(label = "take")
-    val pulse by transition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "takePulse",
-    )
-    Box(
-        modifier = Modifier
-            .size(72.dp)
-            .focalHalo(
-                color = GuardianTheme.colors.focalGlow,
-                spread = 1.5f,
-                intensity = if (isRecording) pulse else 0.3f,
-            )
-            .clip(CircleShape)
-            .background(
-                when {
-                    !enabled -> GuardianTheme.materialColors.surfaceContainerHigh
-                    isRecording -> GuardianTheme.colors.accentSoft
-                    else -> GuardianTheme.materialColors.onSurface
-                }
-            )
-            .clickable(enabled = enabled && !isRecording, role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            imageVector = if (enabled) GuardianIcons.Mic else GuardianIcons.Check,
-            contentDescription = if (isRecording) "Listening" else "Record a take",
-            tint = when {
-                !enabled -> GuardianTheme.materialColors.onSurfaceVariant
-                isRecording -> GuardianTheme.colors.onAccentSoft
-                else -> GuardianTheme.colors.canvas
-            },
-            modifier = Modifier.size(28.dp),
-        )
-    }
-}
-
 @Preview(showBackground = true, device = "id:pixel_8", heightDp = 1500)
 @Composable
 private fun WakeWordPreview() {
-    GuardianAngelTheme { WakeWordScreen(onBack = {}, onSave = { _, _ -> }) }
+    GuardianAngelTheme { WakeWordScreen(onBack = {}, onSave = {}, onSkip = {}) }
 }

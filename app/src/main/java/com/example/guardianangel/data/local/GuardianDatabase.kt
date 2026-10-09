@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.sqlite.execSQL
 
 /**
  * The on-device database.
@@ -34,7 +35,7 @@ import androidx.room.RoomDatabase
         SafePlaceEntity::class,
         DisarmPinEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class GuardianDatabase : RoomDatabase() {
@@ -53,12 +54,26 @@ abstract class GuardianDatabase : RoomDatabase() {
         private const val NAME = "guardian-angel.db"
 
         /**
-         * All migrations, in order.
+         * Adds `tokenizerVersion` to `wake_words`.
          *
-         * Empty at version 1. Each future schema change adds a `Migration(n, n + 1)`
-         * here rather than bumping the version and hoping.
+         * Defaulting to 0 marks every existing row as produced by the original, broken
+         * tokeniser, so the first read regenerates its tokens. Anyone who set a wake
+         * word before this fix had one that could never fire; they get a working one
+         * back without being asked to do anything.
          */
-        val MIGRATIONS: Array<androidx.room.migration.Migration> = emptyArray()
+        private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+            override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE wake_words ADD COLUMN tokenizerVersion INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /**
+         * All migrations, in order. Each schema change adds one here rather than
+         * bumping the version and hoping.
+         */
+        val MIGRATIONS: Array<androidx.room.migration.Migration> = arrayOf(MIGRATION_1_2)
 
         @Volatile
         private var instance: GuardianDatabase? = null

@@ -129,6 +129,16 @@ data class WakeWordEntity(
      * had shifted underneath her.
      */
     val tokens: String,
+    /**
+     * Which tokeniser produced [tokens].
+     *
+     * Tokens are cached rather than derived so a phrase keeps matching what the user
+     * confirmed. But a tokeniser *bug* makes cached tokens wrong, and the first one was
+     * badly wrong — greedy segmentation meant the wake word never fired at all. This
+     * lets a fix regenerate stale tokens instead of leaving people with a phrase that
+     * silently does nothing.
+     */
+    val tokenizerVersion: Int = 0,
     val sensitivity: String = "Balanced",
     val requireVoiceMatch: Boolean = true,
     val voiceSamples: Int = 0,

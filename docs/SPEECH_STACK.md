@@ -238,6 +238,31 @@ can lead with while still accepting anything.
 
 #### What changed in the app
 
+#### One embedding window, everywhere
+
+A constraint worth stating loudly, because it is invisible and it broke the voice gate
+completely. **CAM++ embeddings are only comparable between inputs of similar duration.**
+Measured on a Pixel 7a, one speaker, one sentence:
+
+| Comparison | Cosine similarity |
+| --- | --- |
+| Fixed 1.5 s windows, same speaker | 0.79 mean, 0.61 worst |
+| Fixed 3 s windows, same speaker | 0.92 |
+| Same speech at 1 s vs 2 s | **-0.03** |
+| Same speech at 1.5 s vs 3 s | **0.24** |
+| Silence vs speech | -0.02 |
+
+The first implementation trimmed each take to a variable length and enrolled on 3 s
+segments, while the wake-word gate verified against a 1.5 s pre-roll. Every component
+passed its own tests, and the gate would have rejected the enrolled user on every wake.
+
+So `SherpaSpeakerIdentifier.EMBED_WINDOW_SAMPLES` (1.5 s) is the one window length used
+by enrolment, wake-word verification and diarization, and `speechWindow()` is the only
+place that picks it — sliding a fixed window to the densest speech rather than trimming
+to whatever survives. 1.5 s because the gate has the tightest constraint: the pre-roll
+must hold a two or three syllable phrase plus the decoder's lag, and cannot grow without
+delaying the wake.
+
 `SherpaWakeWordDetector` replaces the embedding path. Phrase detection and speaker
 identity are now two independent checks rather than one model doing both: the spotter
 decides *the phrase was said*, and the CAM++ voiceprint decides *she said it* when
@@ -277,9 +302,15 @@ Before shipping, pick one:
 
 ### 8.4 Things only you can test
 
-- **Say the wake word on a real device.** The model is confirmed loading, but emulators
-  have no usable microphone — false accept and false reject rates are meaningless
-  without real speech in real rooms. Try the curated phrases first, then your own.
+- **Say the wake word out loud, armed, phone in pocket.** Detection itself is proven on
+  device — recorded speech fed through the real capture path fires it, and unrelated
+  speech does not — but no instrumented test can tell you how it behaves with *your*
+  voice, at arm's length, through fabric, in a room with a television on. Try the curated
+  phrases first, then your own.
+- **Enrol your voice, then have someone else say your wake word.** Enrolment and the
+  speaker gate are tested with one recorded speaker, which proves the gate accepts its
+  owner and rejects noise and silence. It cannot prove the threshold is right for two
+  real people, which is the number that matters.
 - **Walk around for an hour with it armed** and report the battery delta. The 3–5%/10h
   figure is from the literature, not from this app.
 - **Try to make it cry wolf** — a loud bar, an argument on TV, a film with screaming.

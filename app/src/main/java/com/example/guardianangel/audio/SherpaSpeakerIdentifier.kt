@@ -12,7 +12,7 @@ private const val TAG = "SpeakerId"
 /**
  * Tier 2c — whose voice is this, via the CAM++ speaker embedding.
  *
- * Does two jobs from one 192-dimensional embedding:
+ * Does two jobs from one 512-dimensional embedding:
  *
  *  - **Verification.** Is this the enrolled user? Gates the wake word when
  *    `WakeWord.requireVoiceMatch` is on, so someone else saying her phrase cannot start
@@ -30,6 +30,17 @@ class SherpaSpeakerIdentifier(
     private val context: Context,
 ) {
     private var extractor: SpeakerEmbeddingExtractor? = null
+
+    /**
+     * Guards the native extractor.
+     *
+     * Enrolment runs [embed] on a background coroutine, and leaving the screen mid-take
+     * calls [close] from the composition — which would free the extractor while a
+     * computation holds a pointer to it. The transcriber had the same shape and it
+     * crashed the process natively; walking away from a recording is at least as likely
+     * as standing down from a walk.
+     */
+    private val nativeLock = Any()
 
     /** Enrolled user's voiceprint, set once calibration has run. */
     @Volatile
@@ -60,8 +71,24 @@ class SherpaSpeakerIdentifier(
         }
     }
 
-    /** Embeds one speech segment. Needs roughly a second of speech to be meaningful. */
-    fun embed(samples: FloatArray): FloatArray? {
+    /**
+     * Finds the speech in [samples] and embeds exactly one [EMBED_WINDOW_SAMPLES] window.
+     *
+     * **The way to produce an embedding that will be compared to another one.** Raw
+     * [embed] takes whatever length it is given, and embeddings of different lengths are
+     * not comparable — see [speechWindow]. Everything that compares voices goes through
+     * here so the lengths always match.
+     */
+    fun embedSpeech(samples: FloatArray): FloatArray? =
+        speechWindow(samples)?.let(::embed)
+
+    /**
+     * Embeds [samples] as given.
+     *
+     * Prefer [embedSpeech]: this does no length normalisation, so two calls with
+     * different-length input produce embeddings that cannot be meaningfully compared.
+     */
+    fun embed(samples: FloatArray): FloatArray? = synchronized(nativeLock) {
         val current = extractor ?: return null
         if (samples.size < MIN_SAMPLES) return null
         return try {
@@ -84,7 +111,7 @@ class SherpaSpeakerIdentifier(
     /** True when [samples] match the enrolled voiceprint. */
     fun matchesEnrolledUser(samples: FloatArray): Boolean {
         val reference = enrolledVoiceprint ?: return false
-        val embedding = embed(samples) ?: return false
+        val embedding = embedSpeech(samples) ?: return false
         return cosineSimilarity(embedding, reference) >= SAME_SPEAKER
     }
 
@@ -94,7 +121,7 @@ class SherpaSpeakerIdentifier(
      * @return a stable label like `spk0`, or null when the segment is too short to judge.
      */
     fun labelSpeaker(samples: FloatArray): String? {
-        val embedding = embed(samples) ?: return null
+        val embedding = embedSpeech(samples) ?: return null
 
         var bestIndex = -1
         var bestScore = SAME_SPEAKER
@@ -122,14 +149,14 @@ class SherpaSpeakerIdentifier(
     /** Clears per-session speakers. The enrolled voiceprint is kept. */
     fun resetSession() = sessionSpeakers.clear()
 
-    fun close() {
+    fun close() = synchronized(nativeLock) {
         extractor?.release()
         extractor = null
         sessionSpeakers.clear()
     }
 
-    private companion object {
-        const val MODEL_ASSET = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
+    companion object {
+        private const val MODEL_ASSET = "3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx"
 
         /**
          * Cosine similarity above which two segments are the same person.
@@ -143,5 +170,20 @@ class SherpaSpeakerIdentifier(
 
         /** Half a second. Shorter segments give unstable embeddings. */
         const val MIN_SAMPLES = SAMPLE_RATE / 2
+
+        /**
+         * The one window length every comparable embedding is made from: 1.5 s.
+         *
+         * Not a tuning knob. CAM++ embeddings are only comparable between inputs of
+         * similar duration — measured on one speaker, fixed 1.5 s windows agree at 0.79
+         * mean / 0.61 worst, while the same speech at 1 s versus 2 s scores -0.03. So
+         * enrolment, wake-word verification and diarization must all use this value or
+         * they are comparing incomparable vectors.
+         *
+         * 1.5 s specifically because the wake-word gate has the tightest constraint: it
+         * verifies against a pre-roll that has to contain a two or three syllable phrase
+         * plus the decoder's own lag, and cannot be longer without delaying the wake.
+         */
+        const val EMBED_WINDOW_SAMPLES = SAMPLE_RATE * 3 / 2
     }
 }

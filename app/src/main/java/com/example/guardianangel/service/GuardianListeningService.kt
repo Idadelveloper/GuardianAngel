@@ -56,7 +56,26 @@ import kotlinx.coroutines.flow.asStateFlow
 class GuardianListeningService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /**
+     * Teardown runs here, not in [scope].
+     *
+     * Releasing the session has to finish flushing the transcript before it frees the
+     * recogniser, and it cannot do that on a scope that is itself being cancelled. Kept
+     * separate so shutdown can complete even as the session's work is stopped.
+     */
+    private val teardownScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private var session: GuardianAudioSession? = null
+
+    /**
+     * True when this service was started to record straight away.
+     *
+     * The manual button cannot simply call into a running session, because usually there
+     * isn't one — the point of the button is to work when Angel is not armed. So the
+     * intent carries the intent, and recording begins as soon as the models are up.
+     */
+    private var startRecordingWhenReady = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -66,6 +85,19 @@ class GuardianListeningService : Service() {
                 stopListening()
                 return START_NOT_STICKY
             }
+
+            ACTION_RECORD -> {
+                // Already listening: flip the live session over rather than rebuilding it.
+                val live = session
+                if (live != null) {
+                    live.forceRecording(MANUAL_TRIGGER)
+                    updateNotification(recording = true)
+                } else {
+                    startRecordingWhenReady = true
+                    startListening()
+                }
+            }
+
             else -> startListening()
         }
         // START_STICKY would have Android restart us after a kill — but the restart
@@ -102,9 +134,32 @@ class GuardianListeningService : Service() {
         val container = appContainer
         val listening = container.listeningRepository
         val guardian = container.guardianRepository
+        val voiceProfiles = container.voiceProfileRepository
 
         scope.launch {
             val wakeWord = listening.observeWakeWord().first()
+
+            // Loaded here, not in the session, so the audio layer never has to know how
+            // the voiceprint is stored or decrypted.
+            val profile = runCatching { voiceProfiles.observe().first() }.getOrNull()
+            val voiceprint = runCatching { voiceProfiles.load() }.getOrNull()
+
+            // The switch is a request, not the decision. Gating on a voiceprint built
+            // from takes that disagreed would not keep a stranger out — it would stop
+            // Angel waking for the person she belongs to, which is the one failure this
+            // feature must never have. So the gate engages only when the voiceprint is
+            // good enough to trust, and the UI says when it is not.
+            val gateOnVoice = wakeWord.requireVoiceMatch &&
+                voiceprint != null &&
+                profile?.isUsable == true
+            if (wakeWord.requireVoiceMatch && !gateOnVoice) {
+                Log.i(
+                    TAG,
+                    "Voice matching is on but the voiceprint is not usable " +
+                        "(clarity=${profile?.clarityPercent}, samples=${profile?.sampleCount}); " +
+                        "waking for any voice",
+                )
+            }
 
             val audio = GuardianAudioSession(
                 context = applicationContext,
@@ -131,14 +186,29 @@ class GuardianListeningService : Service() {
             )
             session = audio
 
-            val ready = audio.prepare(wakeWord.phrase)
+            val ready = audio.prepare(
+                wakePhrase = wakeWord.phrase,
+                voiceprint = voiceprint,
+                requireVoiceMatch = gateOnVoice,
+            )
             listening.setDetectorReady(ready)
-            if (!ready) {
+
+            // A manual recording does not need the keyword model — it needs the
+            // microphone. Refusing to record because hands-free is unavailable would
+            // take away the fallback exactly when it is the only thing left.
+            if (!ready && !startRecordingWhenReady) {
                 Log.w(TAG, "No wake-word model; listening cannot start")
                 stopListening()
                 return@launch
             }
+
             audio.start()
+            if (startRecordingWhenReady) {
+                startRecordingWhenReady = false
+                audio.forceRecording(MANUAL_TRIGGER)
+                guardian.startRecording(trigger = null)
+                updateNotification(recording = true)
+            }
         }
     }
 
@@ -161,18 +231,33 @@ class GuardianListeningService : Service() {
     }
 
     private fun stopListening() {
-        session?.release()
+        val closing = session
         session = null
         _state.value = false
+        // The notification and the service go immediately — the user asked to stand down
+        // and should see that happen. Freeing the models trails behind, in order.
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        if (closing != null) {
+            teardownScope.launch {
+                closing.release()
+                stopSelf()
+            }
+        } else {
+            stopSelf()
+        }
     }
 
     override fun onDestroy() {
-        session?.release()
+        val closing = session
         session = null
         scope.cancel()
         _state.value = false
+        // Not awaited: onDestroy must return promptly. The models are freed on the
+        // teardown scope, which outlives this call.
+        teardownScope.launch {
+            closing?.release()
+            teardownScope.cancel()
+        }
         super.onDestroy()
     }
 
@@ -240,6 +325,10 @@ class GuardianListeningService : Service() {
         private const val CHANNEL_ID = "guardian_listening"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.example.guardianangel.STOP_LISTENING"
+        private const val ACTION_RECORD = "com.example.guardianangel.START_RECORDING"
+
+        /** Marks a session the user started by hand rather than by speaking. */
+        const val MANUAL_TRIGGER = "manual"
 
         private val _state = MutableStateFlow(false)
 
@@ -254,6 +343,22 @@ class GuardianListeningService : Service() {
          */
         fun start(context: Context) {
             val intent = Intent(context, GuardianListeningService::class.java)
+            androidx.core.content.ContextCompat.startForegroundService(context, intent)
+        }
+
+        /**
+         * Starts recording now, arming first if necessary.
+         *
+         * The manual path, and the answer to "what if the wake word doesn't hear me".
+         * Needs only `RECORD_AUDIO`: without notification permission the required
+         * notification is suppressed by the system, but the service still runs and the
+         * platform still shows its own microphone indicator.
+         *
+         * **Must be called while an activity is visible**, like [start].
+         */
+        fun record(context: Context) {
+            val intent = Intent(context, GuardianListeningService::class.java)
+                .setAction(ACTION_RECORD)
             androidx.core.content.ContextCompat.startForegroundService(context, intent)
         }
 

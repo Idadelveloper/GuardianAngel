@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,6 +23,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.guardianangel.domain.model.ListeningSensitivity
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.domain.repository.VoiceProfile
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
+import com.example.guardianangel.ui.voice.VoiceEnrolmentCard
+import com.example.guardianangel.ui.voice.VoiceEnrolmentUiState
+import com.example.guardianangel.ui.voice.rememberVoiceEnrolment
 import com.example.guardianangel.ui.activities.SegmentedToggle
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianOutlinedButton
@@ -35,6 +41,7 @@ import com.example.guardianangel.ui.onboarding.AssuranceCard
 import com.example.guardianangel.ui.onboarding.GuardianSwitch
 import com.example.guardianangel.ui.theme.GuardianAngelTheme
 import com.example.guardianangel.ui.theme.GuardianTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -48,19 +55,37 @@ import kotlinx.coroutines.launch
 @Composable
 fun SettingsWakeWordRoute(
     repository: ListeningRepository,
+    voiceProfiles: VoiceProfileRepository,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val wakeWord by repository.observeWakeWord()
         .collectAsStateWithLifecycle(initialValue = WakeWord(phrase = ""))
+    val enrolment = rememberVoiceEnrolment(repository, voiceProfiles)
+    var draft by remember(wakeWord.phrase) { mutableStateOf(wakeWord.phrase) }
+    var isUsable by remember { mutableStateOf(true) }
+
+    // Debounced so the warning does not flicker on every keystroke mid-word.
+    LaunchedEffect(draft) {
+        if (draft.isBlank()) {
+            isUsable = true
+            return@LaunchedEffect
+        }
+        delay(350)
+        isUsable = repository.canUseWakePhrase(draft.trim())
+    }
 
     SettingsWakeWordScreen(
         wakeWord = wakeWord,
+        enrolment = enrolment.state,
+        draft = draft,
+        onDraftChange = { draft = it },
+        isDraftUsable = isUsable,
         onBack = onBack,
         onSavePhrase = { scope.launch { repository.setWakeWordPhrase(it) } },
-        onAddTake = { scope.launch { repository.addEnrolmentTake() } },
-        onClearEnrolment = { scope.launch { repository.clearEnrolment() } },
+        onAddTake = enrolment.controller::recordTake,
+        onClearEnrolment = enrolment.controller::reset,
         onRequireVoiceMatch = { scope.launch { repository.setRequireVoiceMatch(it) } },
         onSensitivity = { scope.launch { repository.setSensitivity(it) } },
         modifier = modifier,
@@ -71,6 +96,11 @@ fun SettingsWakeWordRoute(
 fun SettingsWakeWordScreen(
     wakeWord: WakeWord,
     onBack: () -> Unit,
+    enrolment: VoiceEnrolmentUiState = VoiceEnrolmentUiState(),
+    draft: String = wakeWord.phrase,
+    onDraftChange: (String) -> Unit = {},
+    /** False when the model cannot express the draft, so saving it would be a lie. */
+    isDraftUsable: Boolean = true,
     onSavePhrase: (String) -> Unit,
     onAddTake: () -> Unit,
     onClearEnrolment: () -> Unit,
@@ -78,7 +108,6 @@ fun SettingsWakeWordScreen(
     onSensitivity: (ListeningSensitivity) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var draft by remember(wakeWord.phrase) { mutableStateOf(wakeWord.phrase) }
     val phraseChanged = draft.trim() != wakeWord.phrase
 
     GuardianStackScaffold(
@@ -88,8 +117,11 @@ fun SettingsWakeWordScreen(
         bottomBar = if (phraseChanged) {
             {
                 GuardianPrimaryButton(
-                    text = "Save and re-record",
-                    onClick = { onSavePhrase(draft) },
+                    text = "Save wake word",
+                    onClick = { onSavePhrase(draft.trim()) },
+                    // Disabled rather than hidden: a greyed button with the reason beside
+                    // the field explains itself; a vanished one looks like a bug.
+                    enabled = isDraftUsable && draft.isNotBlank(),
                     leadingIcon = GuardianIcons.Check,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -121,14 +153,16 @@ fun SettingsWakeWordScreen(
             Spacer(Modifier.height(GuardianTheme.spacing.md))
             GuardianTextField(
                 value = draft,
-                onValueChange = { draft = it },
+                onValueChange = onDraftChange,
                 label = "Wake word",
                 placeholder = "e.g. hey angel",
                 leadingIcon = GuardianIcons.Waveform,
-                supportingText = if (phraseChanged) {
-                    "Save and I'll start listening for the new phrase."
-                } else {
-                    "This is all I need to wake up."
+                isError = draft.isNotBlank() && !isDraftUsable,
+                supportingText = when {
+                    draft.isNotBlank() && !isDraftUsable ->
+                        "I can't pronounce that one — try ordinary words."
+                    phraseChanged -> "Save and I'll start listening for the new phrase."
+                    else -> "This is all I need to wake up."
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -177,36 +211,36 @@ fun SettingsWakeWordScreen(
             // Voice samples are optional and only matter for the check above, so they
             // live with it rather than beside the phrase — recording them is never a
             // condition of Angel waking up.
-            if (wakeWord.requireVoiceMatch) {
+            if (wakeWord.requireVoiceMatch && enrolment.isAvailable) {
                 Spacer(Modifier.height(GuardianTheme.spacing.md))
+                // States what the switch above is *actually doing* right now, not what
+                // it is set to. A voiceprint that is missing or inconsistent means the
+                // gate is off however the switch looks, and hiding that would promise a
+                // protection the app is not providing.
                 Text(
-                    text = if (wakeWord.canMatchVoice) {
-                        "I've heard your voice ${wakeWord.voiceSamples} times — enough to tell it apart."
-                    } else {
-                        "Record your voice ${WakeWord.RECOMMENDED_SAMPLES - wakeWord.voiceSamples} " +
-                            "more times so I can tell it from someone else's. Until then I'll " +
-                            "wake for anyone who says your phrase."
+                    text = when {
+                        enrolment.takes == 0 ->
+                            "I don't know your voice yet, so I'll wake for anyone who " +
+                                "says your phrase. Record below to change that."
+                        enrolment.clarityPercent < VoiceProfile.MIN_CLARITY ->
+                            "Your takes varied too much for me to tell your voice apart " +
+                                "reliably, so for now I'll wake for any voice. Another " +
+                                "recording somewhere quiet would fix it."
+                        else ->
+                            "I know your voice (${enrolment.clarityPercent}% clarity, " +
+                                "${enrolment.takes} samples), so someone else saying your " +
+                                "phrase won't wake me."
                     },
                     style = GuardianTheme.type.bodySm,
                     color = GuardianTheme.materialColors.onSurfaceVariant,
                 )
-                Spacer(Modifier.height(GuardianTheme.spacing.sm))
-                Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
-                    GuardianOutlinedButton(
-                        text = if (wakeWord.canMatchVoice) "Record again" else "Record my voice",
-                        onClick = onAddTake,
-                        leadingIcon = GuardianIcons.Mic,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (wakeWord.voiceSamples > 0) {
-                        GuardianOutlinedButton(
-                            text = "Reset",
-                            onClick = onClearEnrolment,
-                            leadingIcon = GuardianIcons.Refresh,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
+                Spacer(Modifier.height(GuardianTheme.spacing.md))
+                VoiceEnrolmentCard(
+                    state = enrolment,
+                    phrase = wakeWord.phrase,
+                    onRecordTake = onAddTake,
+                    onReset = onClearEnrolment,
+                )
             }
         }
 

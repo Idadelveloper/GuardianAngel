@@ -67,6 +67,7 @@ fun GuardianContactsRoute(
                 onContinue()
             }
         },
+        onSkip = onContinue,
     )
 }
 
@@ -80,6 +81,7 @@ fun GuardianContactsScreen(
         shareGps: Boolean,
         shareAudio: Boolean,
     ) -> Unit,
+    onSkip: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var name by remember { mutableStateOf("") }
@@ -103,6 +105,10 @@ fun GuardianContactsScreen(
         ctaLabel = "Save guardian & continue",
         onCta = { onSave(name.trim(), phone.trim(), relationship, shareGps, shareAudio) },
         ctaEnabled = canSave,
+        // Skippable, but this is the step with the sharpest consequence: codewords that
+        // alert "your circle" have nobody to alert without it.
+        skipLabel = "Skip — add a guardian later",
+        onSkip = onSkip,
     ) {
         AngelSays(
             message = "Who should I reach first? Pick someone who usually has their " +
@@ -195,6 +201,6 @@ fun GuardianContactsScreen(
 @Composable
 private fun GuardianContactsPreview() {
     GuardianAngelTheme {
-        GuardianContactsScreen(onBack = {}, onSave = { _, _, _, _, _ -> })
+        GuardianContactsScreen(onBack = {}, onSave = { _, _, _, _, _ -> }, onSkip = {})
     }
 }

@@ -57,13 +57,9 @@ fun PermissionsRoute(
         onGrant = { location, microphone, notifications ->
             scope.launch {
                 repository.grantPermissions(location, microphone)
-                listeningRepository.updatePermissions(
-                    microphone = microphone,
-                    notifications = notifications,
-                    // Asked for separately, later — it needs a system settings trip and
-                    // blocking setup on it would be hostile.
-                    batteryExempt = false,
-                )
+                // The listening repository reads the system itself; this only tells it
+                // that now is a good moment to look again.
+                listeningRepository.refreshPermissions()
                 onContinue()
             }
         },
@@ -134,6 +130,12 @@ fun PermissionsScreen(
         // it, she just cannot tell guardians where to go. Blocking setup on it would
         // turn a degraded feature into no app at all.
         ctaEnabled = true,
+        // Skipping is allowed, but named for what it costs rather than as a neutral
+        // "later": without the microphone there is no hands-free activation at all, and
+        // a user who skips should know that now rather than discover it on a dark street.
+        skipLabel = if (microphone && notifications) null else "Skip — no hands-free for now",
+        onSkip = { onGrant(location, microphone, notifications) }
+            .takeIf { !(microphone && notifications) },
     ) {
         AngelSays(
             message = "To watch your route and listen for your codewords, I need two " +

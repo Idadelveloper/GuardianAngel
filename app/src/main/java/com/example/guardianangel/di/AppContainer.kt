@@ -15,7 +15,9 @@ import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.GuardianRepository
 import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.domain.repository.PermissionProbe
 import com.example.guardianangel.domain.repository.RouteRepository
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
 
 /**
  * The application's object graph.
@@ -38,6 +40,17 @@ interface AppContainer {
     val routeRepository: RouteRepository
     val listeningRepository: ListeningRepository
     val authRepository: AuthRepository
+
+    /** The enrolled voiceprint. Encrypted at rest and never uploaded. */
+    val voiceProfileRepository: VoiceProfileRepository
+
+    /**
+     * Live permission state.
+     *
+     * Exposed so screens can ask the system rather than cache an answer — a cached
+     * permission is wrong the moment the user changes it in system settings.
+     */
+    val permissionProbe: PermissionProbe
 
     /** Optional cloud backup. Reports Unavailable when no Firebase project is set up. */
     val cloudSync: CloudSync
@@ -65,6 +78,10 @@ class InMemoryAppContainer(
         FakeListeningRepository(startEnrolled = startSignedIn)
     override val authRepository: AuthRepository =
         com.example.guardianangel.data.auth.PreviewAuthRepository(startSignedIn)
+    override val voiceProfileRepository: VoiceProfileRepository =
+        com.example.guardianangel.data.FakeVoiceProfileRepository(enrolled = startSignedIn)
+    override val permissionProbe: PermissionProbe =
+        com.example.guardianangel.data.GrantedPermissions()
 
     // Previews never touch the network or a database.
     override val cloudSync = CloudSync(

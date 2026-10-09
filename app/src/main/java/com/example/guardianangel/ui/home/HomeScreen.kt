@@ -32,14 +32,22 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.guardianangel.data.ActivitySamples
 import com.example.guardianangel.data.GuardianSamples
 import com.example.guardianangel.domain.model.CodewordTier
+import com.example.guardianangel.domain.model.GuardianCapability
+import com.example.guardianangel.domain.model.GuardianSetup
+import com.example.guardianangel.domain.model.guardianSetup
 import com.example.guardianangel.domain.model.GuardianMode
 import com.example.guardianangel.domain.model.GuardianSnapshot
 import com.example.guardianangel.domain.model.ListeningRequirement
 import com.example.guardianangel.domain.model.ListeningStatus
 import com.example.guardianangel.domain.model.WakeWord
+import com.example.guardianangel.domain.repository.CodewordRepository
+import com.example.guardianangel.domain.repository.ContactsRepository
+import com.example.guardianangel.domain.repository.PermissionProbe
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
 import com.example.guardianangel.domain.repository.GuardianRepository
 import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.ui.components.GuardianCard
+import com.example.guardianangel.ui.components.GuardianOutlinedButton
 import com.example.guardianangel.ui.components.GuardianPrimaryButton
 import com.example.guardianangel.ui.components.GuardianTabScaffold
 import com.example.guardianangel.ui.home.components.ActiveRecordingPanel
@@ -49,6 +57,7 @@ import com.example.guardianangel.ui.home.components.GuardianTopBar
 import com.example.guardianangel.ui.home.components.GuardiansStrip
 import com.example.guardianangel.ui.home.components.HandsFreeCard
 import com.example.guardianangel.ui.home.components.MetricTile
+import com.example.guardianangel.ui.home.components.SetupNeededCard
 import com.example.guardianangel.ui.home.components.QuickActionRow
 import com.example.guardianangel.ui.home.components.RecentActivityCard
 import com.example.guardianangel.ui.home.components.SafetyGaugeCard
@@ -76,9 +85,16 @@ import com.example.guardianangel.ui.theme.GuardianTheme
 fun HomeRoute(
     repository: GuardianRepository,
     listeningRepository: ListeningRepository,
+    codewordRepository: CodewordRepository,
+    contactsRepository: ContactsRepository,
+    voiceProfiles: VoiceProfileRepository,
+    permissions: PermissionProbe,
     onOpenSession: (String) -> Unit,
     onPlanRoute: () -> Unit,
     onSetUpWakeWord: () -> Unit,
+    onSetUpVoice: () -> Unit,
+    onSetUpCodewords: () -> Unit,
+    onSetUpGuardians: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory(repository))
@@ -90,6 +106,26 @@ fun HomeRoute(
     val wakeWord by listeningRepository.observeWakeWord()
         .collectAsStateWithLifecycle(initialValue = WakeWord(phrase = ""))
 
+    // Deliberately from the repositories that hold real rows, not from the snapshot:
+    // the snapshot is still sample content, and a setup card built on samples would
+    // reassure the user about things she has not actually set up.
+    val codewords by codewordRepository.observeCodewords()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val guardians by contactsRepository.observeContacts()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val voiceProfile by voiceProfiles.observe()
+        .collectAsStateWithLifecycle(initialValue = null)
+
+    val setup = guardianSetup(
+        hasWakeWord = wakeWord.isEnrolled,
+        voiceprintUsable = voiceProfile?.isUsable == true,
+        // Read through the probe so a permission granted in onboarding is reflected on
+        // the first frame, rather than after a resume.
+        hasLocationPermission = permissions.hasLocation(),
+        codewordCount = codewords.size,
+        guardianCount = guardians.size,
+    )
+
     HomeScreen(
         state = state,
         listeningStatus = listeningStatus,
@@ -99,6 +135,22 @@ fun HomeRoute(
         onPlanRoute = onPlanRoute,
         onArm = handsFree::arm,
         onDisarm = handsFree::disarm,
+        onRecordNow = {
+            // Opens the microphone for real. Previously this action only moved the UI
+            // into its recording state, so the one control that was meant to work when
+            // hands-free failed recorded nothing at all.
+            if (handsFree.recordNow()) viewModel.onAction(HomeAction.StartRecording(null))
+        },
+        setup = setup,
+        onFixCapability = { capability ->
+            when (capability) {
+                GuardianCapability.HandsFree -> onSetUpWakeWord()
+                GuardianCapability.VoiceMatch -> onSetUpVoice()
+                GuardianCapability.LocationSharing -> handsFree.requestLocation()
+                GuardianCapability.CodewordActions -> onSetUpCodewords()
+                GuardianCapability.GuardianAlerts -> onSetUpGuardians()
+            }
+        },
         onFixBlocker = { requirement ->
             when (requirement) {
                 ListeningRequirement.WakeWordEnrolled -> onSetUpWakeWord()
@@ -120,6 +172,9 @@ fun HomeScreen(
     wakeWord: WakeWord = WakeWord(phrase = ""),
     onArm: () -> Unit = {},
     onDisarm: () -> Unit = {},
+    onRecordNow: () -> Unit = {},
+    setup: GuardianSetup = GuardianSetup(GuardianCapability.entries.toSet()),
+    onFixCapability: (GuardianCapability) -> Unit = {},
     onFixBlocker: (ListeningRequirement) -> Unit = {},
 ) {
     when (state) {
@@ -133,6 +188,9 @@ fun HomeScreen(
             onPlanRoute = onPlanRoute,
             onArm = onArm,
             onDisarm = onDisarm,
+            onRecordNow = onRecordNow,
+            setup = setup,
+            onFixCapability = onFixCapability,
             onFixBlocker = onFixBlocker,
             modifier = modifier,
         )
@@ -169,6 +227,9 @@ private fun ReadyState(
     onPlanRoute: () -> Unit,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
+    onRecordNow: () -> Unit,
+    setup: GuardianSetup,
+    onFixCapability: (GuardianCapability) -> Unit,
     onFixBlocker: (ListeningRequirement) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -199,6 +260,12 @@ private fun ReadyState(
             badgeIcon = if (atHaven) GuardianIcons.Moon else GuardianIcons.Waveform,
         )
 
+        // Above the hands-free card: a gap in setup is the reason hands-free might not
+        // work, so it reads in the right order.
+        if (!setup.isComplete) {
+            SetupNeededCard(setup = setup, onFix = onFixCapability)
+        }
+
         HandsFreeCard(
             status = listeningStatus,
             wakeWord = wakeWord,
@@ -223,9 +290,9 @@ private fun ReadyState(
         }
 
         if (atHaven) {
-            SanctuaryBody(snapshot, onAction, onPlanRoute)
+            SanctuaryBody(snapshot, onAction, onPlanRoute, onRecordNow)
         } else {
-            JourneyBody(snapshot, onAction, isRecording)
+            JourneyBody(snapshot, onAction, isRecording, onRecordNow)
         }
 
         GuardiansStrip(contacts = snapshot.contacts)
@@ -251,6 +318,7 @@ private fun SanctuaryBody(
     snapshot: GuardianSnapshot,
     onAction: (HomeAction) -> Unit,
     onPlanRoute: () -> Unit,
+    onRecordNow: () -> Unit,
 ) {
     SafetyGaugeCard(
         score = snapshot.safetyScore,
@@ -271,7 +339,7 @@ private fun SanctuaryBody(
     QuickActionRow(
         leftLabel = "Record quietly",
         leftIcon = GuardianIcons.Mic,
-        onLeft = { onAction(HomeAction.StartRecording(CodewordTier.Caution)) },
+        onLeft = onRecordNow,
         rightLabel = "Hold SOS",
         rightIcon = GuardianIcons.CrisisAlert,
         onRight = { onAction(HomeAction.DispatchAlert(CodewordTier.Danger)) },
@@ -285,6 +353,7 @@ private fun JourneyBody(
     snapshot: GuardianSnapshot,
     onAction: (HomeAction) -> Unit,
     isRecording: Boolean,
+    onRecordNow: () -> Unit,
 ) {
     val journey = snapshot.journey
 
@@ -330,6 +399,18 @@ private fun JourneyBody(
         leadingIcon = GuardianIcons.ShieldCheck,
         modifier = Modifier.fillMaxWidth(),
     )
+
+    if (!isRecording) {
+        // Mid-walk is where the wake word is most likely to be drowned out by traffic,
+        // so the manual path has to be reachable here too — not only from the sanctuary
+        // screen the user sees before setting off.
+        GuardianOutlinedButton(
+            text = "Start recording now",
+            onClick = onRecordNow,
+            leadingIcon = GuardianIcons.Mic,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 /** What Angel says, in her own voice, for the current situation. */

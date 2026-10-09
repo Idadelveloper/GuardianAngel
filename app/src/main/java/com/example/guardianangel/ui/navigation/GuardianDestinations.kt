@@ -34,6 +34,16 @@ object Routes {
     const val SETTINGS_CODEWORDS = "settings/codewords"
     const val SETTINGS_GUARDIANS = "settings/guardians"
     const val SETTINGS_VOICE = "settings/voice"
+
+    /**
+     * Re-enrolling the voiceprint from settings.
+     *
+     * A separate destination from [VOICE_CALIBRATION] even though it shows the same
+     * screen, because the two differ in where Continue goes. Reusing the onboarding
+     * route sent a user who tapped "recalibrate" into the rest of the wizard — adding a
+     * guardian, setting codewords — on the way back out.
+     */
+    const val SETTINGS_VOICE_RECALIBRATE = "settings/voice/recalibrate"
     const val SETTINGS_WAKE_WORD = "settings/wake-word"
 
     fun sessionDetail(sessionId: String) = "session/$sessionId"

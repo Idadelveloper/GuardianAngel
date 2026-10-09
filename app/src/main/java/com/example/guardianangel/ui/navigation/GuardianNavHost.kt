@@ -133,6 +133,8 @@ private fun NavGraphBuilder.onboardingGraph(
         composable(Routes.VOICE_CALIBRATION) {
             VoiceCalibrationRoute(
                 repository = container.accountRepository,
+                listeningRepository = container.listeningRepository,
+                voiceProfiles = container.voiceProfileRepository,
                 onBack = navController::popBackStack,
                 onContinue = { navController.navigate(Routes.GUARDIAN_CONTACTS) },
             )
@@ -148,6 +150,7 @@ private fun NavGraphBuilder.onboardingGraph(
         composable(Routes.WAKE_WORD) {
             WakeWordRoute(
                 repository = container.listeningRepository,
+                voiceProfiles = container.voiceProfileRepository,
                 onBack = navController::popBackStack,
                 onContinue = { navController.navigate(Routes.CODEWORD_SETUP) },
             )
@@ -178,9 +181,16 @@ private fun NavGraphBuilder.mainGraph(
             HomeRoute(
                 repository = container.guardianRepository,
                 listeningRepository = container.listeningRepository,
+                codewordRepository = container.codewordRepository,
+                contactsRepository = container.contactsRepository,
+                voiceProfiles = container.voiceProfileRepository,
+                permissions = container.permissionProbe,
                 onOpenSession = { navController.navigate(Routes.sessionDetail(it)) },
                 onPlanRoute = { navController.navigateToTab(Routes.MAP) },
                 onSetUpWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
+                onSetUpVoice = { navController.navigate(Routes.SETTINGS_VOICE_RECALIBRATE) },
+                onSetUpCodewords = { navController.navigate(Routes.SETTINGS_CODEWORDS) },
+                onSetUpGuardians = { navController.navigate(Routes.SETTINGS_GUARDIANS) },
             )
         }
         composable(Routes.MAP, enterTransition = { fadeThrough() }, exitTransition = { fadeAway() }) {
@@ -248,14 +258,25 @@ private fun NavGraphBuilder.stackedGraph(
     composable(Routes.SETTINGS_WAKE_WORD) {
         SettingsWakeWordRoute(
             repository = container.listeningRepository,
+            voiceProfiles = container.voiceProfileRepository,
             onBack = navController::popBackStack,
+        )
+    }
+    composable(Routes.SETTINGS_VOICE_RECALIBRATE) {
+        VoiceCalibrationRoute(
+            repository = container.accountRepository,
+            listeningRepository = container.listeningRepository,
+            voiceProfiles = container.voiceProfileRepository,
+            onBack = navController::popBackStack,
+            // Back to settings, not onward through the wizard.
+            onContinue = navController::popBackStack,
         )
     }
     composable(Routes.SETTINGS_VOICE) {
         SettingsVoiceRoute(
             repository = container.accountRepository,
             onBack = navController::popBackStack,
-            onRecalibrate = { navController.navigate(Routes.VOICE_CALIBRATION) },
+            onRecalibrate = { navController.navigate(Routes.SETTINGS_VOICE_RECALIBRATE) },
         )
     }
 }

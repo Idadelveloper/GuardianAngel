@@ -1,6 +1,6 @@
 package com.example.guardianangel.data.local
 
-import com.example.guardianangel.audio.BpeTokenizer
+import com.example.guardianangel.audio.SentencePieceTokenizer
 import com.example.guardianangel.data.crypto.KeystoreCrypto
 import com.example.guardianangel.domain.model.Codeword
 import com.example.guardianangel.domain.model.CodewordTier
@@ -10,6 +10,8 @@ import com.example.guardianangel.domain.model.ListeningSensitivity
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
+import com.example.guardianangel.domain.repository.VoiceProfile
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -48,7 +50,7 @@ class CurrentUser(private val userDao: UserDao) {
 class RoomWakeWordStore(
     private val dao: WakeWordDao,
     private val currentUser: CurrentUser,
-    private val tokenizer: BpeTokenizer?,
+    private val tokenizer: SentencePieceTokenizer?,
 ) {
     @OptIn(ExperimentalCoroutinesApi::class)
     fun observe(): Flow<WakeWord> = currentUser.observeId().flatMapLatest { userId ->
@@ -63,10 +65,26 @@ class RoomWakeWordStore(
             (existing ?: blank(userId)).copy(
                 phrase = trimmed,
                 tokens = tokenizer?.tokenize(trimmed).orEmpty(),
+                tokenizerVersion = if (tokenizer != null) SentencePieceTokenizer.VERSION else 0,
                 updatedAt = System.currentTimeMillis(),
             )
         )
     }
+
+    /**
+     * Whether the keyword model can express [phrase] at all.
+     *
+     * The spotter matches a phrase by its sub-word pieces, and a phrase containing
+     * pieces outside the model's vocabulary cannot be registered — it would be saved,
+     * look set up, and never once fire. So this is checked before saving rather than
+     * discovered on a dark street.
+     *
+     * True when no tokeniser is installed: a build without the model cannot do
+     * hands-free activation at all, and refusing phrases on top of that would be
+     * confusing rather than informative.
+     */
+    fun canRepresent(phrase: String): Boolean =
+        phrase.isNotBlank() && (tokenizer == null || tokenizer.canRepresent(phrase))
 
     suspend fun addVoiceSample() = update { it.copy(voiceSamples = it.voiceSamples + 1) }
 
@@ -77,10 +95,6 @@ class RoomWakeWordStore(
 
     suspend fun setSensitivity(sensitivity: ListeningSensitivity) =
         update { it.copy(sensitivity = sensitivity.name) }
-
-    /** The stored tokens, or null when no wake word is set. */
-    suspend fun tokens(): String? =
-        dao.find(currentUser.requireId())?.tokens?.takeIf { it.isNotBlank() }
 
     private suspend fun update(transform: (WakeWordEntity) -> WakeWordEntity) {
         val userId = currentUser.requireId()
@@ -246,16 +260,26 @@ private fun EmergencyContact.toEntity(userId: String, priority: Int) = GuardianE
 class RoomVoiceProfileStore(
     private val dao: VoiceProfileDao,
     private val currentUser: CurrentUser,
-) {
-    fun observe(): Flow<VoiceProfileEntity?> =
+) : VoiceProfileRepository {
+
+    override fun observe(): Flow<VoiceProfile?> =
         kotlinx.coroutines.flow.flow { emit(currentUser.requireId()) }
             .let { ids ->
                 @OptIn(ExperimentalCoroutinesApi::class)
                 ids.flatMapLatest { dao.observe(it) }
             }
+            .map { entity ->
+                entity?.let {
+                    VoiceProfile(
+                        clarityPercent = it.clarityPercent,
+                        sampleCount = it.sampleCount,
+                        calibratedAt = it.calibratedAt,
+                    )
+                }
+            }
 
     /** Stores the averaged embedding. The raw audio it came from is never written. */
-    suspend fun save(embedding: FloatArray, clarityPercent: Int, sampleCount: Int) {
+    override suspend fun save(embedding: FloatArray, clarityPercent: Int, sampleCount: Int) {
         val userId = currentUser.requireId()
         dao.upsert(
             VoiceProfileEntity(
@@ -271,8 +295,23 @@ class RoomVoiceProfileStore(
     }
 
     /** Null when absent, or when the Keystore key was invalidated and it must be re-enrolled. */
-    suspend fun loadEmbedding(): FloatArray? =
+    override suspend fun load(): FloatArray? =
         dao.find(currentUser.requireId())
             ?.encryptedEmbedding
             ?.let(KeystoreCrypto::decryptFloats)
+
+    override suspend fun clear() {
+        val userId = currentUser.requireId()
+        val existing = dao.find(userId) ?: return
+        dao.upsert(
+            existing.copy(
+                encryptedEmbedding = null,
+                embeddingDim = 0,
+                clarityPercent = 0,
+                sampleCount = 0,
+                calibratedAt = null,
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+    }
 }

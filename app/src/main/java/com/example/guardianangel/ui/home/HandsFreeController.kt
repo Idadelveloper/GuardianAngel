@@ -43,6 +43,7 @@ class HandsFreeController(
     private val repository: ListeningRepository,
     private val requestMicrophone: () -> Unit,
     private val requestNotifications: () -> Unit,
+    private val requestLocationPermission: () -> Unit,
     private val scope: kotlinx.coroutines.CoroutineScope,
 ) {
     /**
@@ -68,15 +69,15 @@ class HandsFreeController(
         }
     }
 
-    /** Pushes current system permission state into the repository. */
+    /**
+     * Asks the repository to re-read the system.
+     *
+     * Needed because granting a permission is invisible to app state — nothing
+     * observable changes when the user taps Allow — so something has to say "look again"
+     * after a dialog or a trip to settings. The repository does the reading itself.
+     */
     fun syncPermissions() {
-        scope.launch {
-            repository.updatePermissions(
-                microphone = context.hasPermission(Manifest.permission.RECORD_AUDIO),
-                notifications = context.hasNotificationPermission(),
-                batteryExempt = context.isIgnoringBatteryOptimisations(),
-            )
-        }
+        scope.launch { repository.refreshPermissions() }
     }
 
     /** Arms listening. Only valid while an activity is visible. */
@@ -93,6 +94,28 @@ class HandsFreeController(
             repository.disarm()
         }
     }
+
+    /**
+     * Starts recording from a tap, arming first if Angel is not already listening.
+     *
+     * Kept separate from [arm] because it has a weaker precondition on purpose: it needs
+     * the microphone and nothing else. No wake word, no keyword model, no notification
+     * permission. This is the path that still works when everything clever has failed,
+     * so the only thing allowed to block it is the microphone itself.
+     *
+     * @return false when the microphone is missing, after asking for it.
+     */
+    fun recordNow(): Boolean {
+        if (!context.hasPermission(Manifest.permission.RECORD_AUDIO)) {
+            requestMicrophone()
+            return false
+        }
+        GuardianListeningService.record(context)
+        return true
+    }
+
+    /** Asks for location, which the setup card offers when it is missing. */
+    fun requestLocation() = requestLocationPermission()
 
     /** Routes a blocker to the thing that actually resolves it. */
     fun resolve(requirement: ListeningRequirement) {
@@ -123,6 +146,10 @@ fun rememberHandsFreeController(repository: ListeningRepository): HandsFreeContr
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     val controller = remember(repository) {
         HandsFreeController(
             context = context,
@@ -134,6 +161,9 @@ fun rememberHandsFreeController(repository: ListeningRepository): HandsFreeContr
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
+            },
+            requestLocationPermission = {
+                locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
             },
             scope = scope,
         )

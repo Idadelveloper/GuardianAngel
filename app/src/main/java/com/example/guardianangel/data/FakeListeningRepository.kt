@@ -6,6 +6,7 @@ import com.example.guardianangel.domain.model.ListeningState
 import com.example.guardianangel.domain.model.ListeningStatus
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.domain.repository.PermissionProbe
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,13 @@ import kotlinx.coroutines.flow.update
  */
 class FakeListeningRepository(
     startEnrolled: Boolean = true,
+    /** Stands in for the system. Previews get a grant-everything default. */
+    private val permissions: PermissionProbe = GrantedPermissions(
+        microphone = startEnrolled,
+        notifications = startEnrolled,
+        location = startEnrolled,
+        batteryExempt = false,
+    ),
 ) : ListeningRepository {
 
     private val wakeWord = MutableStateFlow(
@@ -31,13 +39,7 @@ class FakeListeningRepository(
         }
     )
 
-    private val permissions = MutableStateFlow(
-        PermissionSnapshot(
-            microphone = startEnrolled,
-            notifications = startEnrolled,
-            batteryExempt = false,
-        )
-    )
+    private val permissionGeneration = MutableStateFlow(0)
     private val hasVoiceProfile = MutableStateFlow(startEnrolled)
     private val detectorReady = MutableStateFlow(false)
     private val state = MutableStateFlow(ListeningState.Off)
@@ -47,16 +49,18 @@ class FakeListeningRepository(
     override fun observeStatus(): Flow<ListeningStatus> =
         combine(
             wakeWord,
-            permissions,
+            permissionGeneration,
             hasVoiceProfile,
             detectorReady,
             state,
-        ) { word, perms, _, ready, current ->
+        ) { word, _, _, ready, current ->
             val blocked = buildList {
-                if (!perms.microphone) add(ListeningRequirement.MicrophonePermission)
-                if (!perms.notifications) add(ListeningRequirement.NotificationPermission)
+                if (!permissions.hasMicrophone()) add(ListeningRequirement.MicrophonePermission)
+                if (!permissions.hasNotifications()) {
+                    add(ListeningRequirement.NotificationPermission)
+                }
                 if (!word.isEnrolled) add(ListeningRequirement.WakeWordEnrolled)
-                if (!perms.batteryExempt) add(ListeningRequirement.BatteryExemption)
+                if (!permissions.isBatteryExempt()) add(ListeningRequirement.BatteryExemption)
             }
             ListeningStatus(
                 // Never claim to be listening while something required is missing.
@@ -77,6 +81,9 @@ class FakeListeningRepository(
         state.value = ListeningState.Off
     }
 
+    // No model in a preview, so nothing is unrepresentable.
+    override suspend fun canUseWakePhrase(phrase: String): Boolean = phrase.isNotBlank()
+
     override suspend fun addEnrolmentTake() =
         wakeWord.update { it.copy(voiceSamples = it.voiceSamples + 1) }
 
@@ -89,12 +96,8 @@ class FakeListeningRepository(
     override suspend fun setSensitivity(sensitivity: ListeningSensitivity) =
         wakeWord.update { it.copy(sensitivity = sensitivity) }
 
-    override suspend fun updatePermissions(
-        microphone: Boolean,
-        notifications: Boolean,
-        batteryExempt: Boolean,
-    ) {
-        permissions.value = PermissionSnapshot(microphone, notifications, batteryExempt)
+    override suspend fun refreshPermissions() {
+        permissionGeneration.value += 1
     }
 
     override suspend fun setDetectorReady(ready: Boolean) {
@@ -113,9 +116,4 @@ class FakeListeningRepository(
         state.value = ListeningState.Triggered
     }
 
-    private data class PermissionSnapshot(
-        val microphone: Boolean,
-        val notifications: Boolean,
-        val batteryExempt: Boolean,
-    )
 }

@@ -22,9 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,7 +35,13 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.guardianangel.audio.VoiceEnroller
 import com.example.guardianangel.domain.repository.AccountRepository
+import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.domain.repository.VoiceProfile
+import com.example.guardianangel.domain.repository.VoiceProfileRepository
+import com.example.guardianangel.ui.voice.VoiceEnrolmentUiState
+import com.example.guardianangel.ui.voice.rememberVoiceEnrolment
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianWizardScaffold
 import com.example.guardianangel.ui.home.components.TonalPill
@@ -46,38 +50,51 @@ import com.example.guardianangel.ui.mascot.AngelMood
 import com.example.guardianangel.ui.theme.GuardianAngelTheme
 import com.example.guardianangel.ui.theme.GuardianTheme
 import com.example.guardianangel.ui.theme.focalHalo
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.sin
-
-private const val TARGET_SECONDS = 60
 
 /**
  * Step 2 — enrol the user's voiceprint.
  *
  * Simplified from the reference, which carried a countdown, a progress bar, three
  * telemetry chips and two transport controls at once. During setup that reads as a studio
- * console; here it is one prompt, one button, one progress ring. Clarity chips appear
- * only once there is something real to report.
+ * console; here it is one prompt, one button, one progress ring. Clarity appears only
+ * once there is something real to report — and it *is* real: it comes from how well the
+ * segments of speech agreed with each other, so a noisy room reports a low number rather
+ * than a reassuring one.
+ *
+ * This step is skippable. Without a voiceprint the wake word still works; it just wakes
+ * for anyone who says the phrase, which the screen says plainly rather than implying a
+ * protection that is not there.
  */
 @Composable
 fun VoiceCalibrationRoute(
     repository: AccountRepository,
+    listeningRepository: ListeningRepository,
+    voiceProfiles: VoiceProfileRepository,
     onBack: () -> Unit,
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val enrolment = rememberVoiceEnrolment(listeningRepository, voiceProfiles)
+
     VoiceCalibrationScreen(
         modifier = modifier,
+        enrolment = enrolment.state,
         onBack = onBack,
+        onToggleRecording = enrolment.controller::recordSession,
+        onStartOver = enrolment.controller::reset,
         onSave = { clarity ->
             scope.launch {
+                // Mirrors the clarity onto the account row the settings screens read.
+                // The voiceprint itself was already saved by the controller.
                 repository.saveVoiceProfile(clarity)
                 onContinue()
             }
         },
+        onSkip = onContinue,
     )
 }
 
@@ -85,33 +102,30 @@ fun VoiceCalibrationRoute(
 fun VoiceCalibrationScreen(
     onBack: () -> Unit,
     onSave: (clarityPercent: Int) -> Unit,
+    onSkip: () -> Unit,
     modifier: Modifier = Modifier,
+    enrolment: VoiceEnrolmentUiState = VoiceEnrolmentUiState(),
+    onToggleRecording: () -> Unit = {},
+    onStartOver: () -> Unit = {},
 ) {
-    var isRecording by remember { mutableStateOf(false) }
-    var elapsed by remember { mutableIntStateOf(0) }
+    val isRecording = enrolment.isRecording
+    val elapsed = enrolment.elapsedMillis / 1000
+    val progress = (enrolment.elapsedMillis.toFloat() / TARGET_MILLIS).coerceIn(0f, 1f)
 
-    // Ticks only while recording, so pausing genuinely freezes the capture.
-    LaunchedEffect(isRecording) {
-        while (isRecording && elapsed < TARGET_SECONDS) {
-            delay(1000)
-            elapsed++
-        }
-        if (elapsed >= TARGET_SECONDS) isRecording = false
-    }
-
-    val progress = elapsed.toFloat() / TARGET_SECONDS
-    val isComplete = elapsed >= TARGET_SECONDS
-    // Clarity is a stand-in until the real acoustic model reports one.
-    val clarity = (70 + progress * 24).toInt()
+    // Having *a* voiceprint is what matters, not having recorded the full minute: the
+    // embedding is useful from the first few seconds of speech and simply gets steadier.
+    val hasVoiceprint = enrolment.takes > 0
 
     GuardianWizardScaffold(
         modifier = modifier,
         stepLabel = "Step 2 of 5 · Your voice",
         progress = 0.4f,
         onBack = onBack,
-        ctaLabel = if (isComplete) "Save voiceprint & continue" else "Record a minute to continue",
-        onCta = { onSave(clarity) },
-        ctaEnabled = isComplete,
+        ctaLabel = if (hasVoiceprint) "Save voiceprint & continue" else "Record to continue",
+        onCta = { onSave(enrolment.clarityPercent) },
+        ctaEnabled = hasVoiceprint && !isRecording,
+        skipLabel = if (hasVoiceprint) null else "Skip — wake for any voice",
+        onSkip = onSkip.takeIf { !hasVoiceprint },
     ) {
         AngelSays(
             message = "Talk to me for a minute so I learn your voice. Tell me about a " +
@@ -157,28 +171,37 @@ fun VoiceCalibrationScreen(
                 Spacer(Modifier.height(GuardianTheme.spacing.lg))
                 MicButton(
                     isRecording = isRecording,
-                    onToggle = { isRecording = !isRecording },
+                    onToggle = onToggleRecording,
                 )
                 Spacer(Modifier.height(GuardianTheme.spacing.sm))
                 Text(
                     text = when {
-                        isComplete -> "Got it — that's plenty."
-                        isRecording -> "Listening… tap to pause"
-                        elapsed > 0 -> "Paused · tap to keep going"
-                        else -> "Tap to start"
+                        enrolment.error != null -> enrolment.error
+                        !enrolment.isAvailable ->
+                            "This build can't learn voices, so I'll wake for any voice " +
+                                "saying your phrase."
+                        isRecording -> "Listening… keep talking"
+                        hasVoiceprint -> "Got it — I know your voice now."
+                        else -> "Tap and talk to me for a minute"
                     },
                     style = GuardianTheme.type.bodySm,
-                    color = GuardianTheme.materialColors.onSurfaceVariant,
+                    color = if (enrolment.error != null) {
+                        GuardianTheme.materialColors.error
+                    } else {
+                        GuardianTheme.materialColors.onSurfaceVariant
+                    },
                 )
 
-                if (elapsed > 0) {
+                if (hasVoiceprint && !isRecording) {
                     Spacer(Modifier.height(GuardianTheme.spacing.md))
                     Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
-                        TonalPill(text = "Clarity $clarity%", icon = GuardianIcons.Check)
                         TonalPill(
-                            text = "Noise filtered",
-                            container = GuardianTheme.materialColors.surfaceContainerLowest,
-                            content = GuardianTheme.materialColors.onSurfaceVariant,
+                            text = "Clarity ${enrolment.clarityPercent}%",
+                            icon = if (enrolment.clarityPercent >= VoiceProfile.MIN_CLARITY) {
+                                GuardianIcons.Check
+                            } else {
+                                GuardianIcons.Warning
+                            },
                         )
                         Text(
                             text = "Start over",
@@ -187,11 +210,19 @@ fun VoiceCalibrationScreen(
                             modifier = Modifier
                                 .align(Alignment.CenterVertically)
                                 .clip(GuardianTheme.shapes.sm)
-                                .clickable {
-                                    isRecording = false
-                                    elapsed = 0
-                                }
+                                .clickable(onClick = onStartOver)
                                 .padding(horizontal = 6.dp, vertical = 4.dp),
+                        )
+                    }
+
+                    if (enrolment.clarityPercent < VoiceProfile.MIN_CLARITY) {
+                        Spacer(Modifier.height(GuardianTheme.spacing.sm))
+                        Text(
+                            text = "That was clear enough to save, but not to tell your " +
+                                "voice from someone else's. Until it improves I'll wake " +
+                                "for any voice saying your phrase.",
+                            style = GuardianTheme.type.bodySm,
+                            color = GuardianTheme.materialColors.onSurfaceVariant,
                         )
                     }
                 }
@@ -206,6 +237,9 @@ fun VoiceCalibrationScreen(
         )
     }
 }
+
+/** The minute of free speech the step asks for. */
+private val TARGET_MILLIS = VoiceEnroller.SESSION_MILLIS
 
 @Composable
 private fun MicButton(isRecording: Boolean, onToggle: () -> Unit) {
@@ -288,5 +322,5 @@ private fun formatSeconds(seconds: Int) = "%d:%02d".format(seconds / 60, seconds
 @Preview(showBackground = true, device = "id:pixel_8", heightDp = 1200)
 @Composable
 private fun VoiceCalibrationPreview() {
-    GuardianAngelTheme { VoiceCalibrationScreen(onBack = {}, onSave = {}) }
+    GuardianAngelTheme { VoiceCalibrationScreen(onBack = {}, onSave = {}, onSkip = {}) }
 }

@@ -19,6 +19,7 @@ import com.example.guardianangel.audio.YamnetAudioTagger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,6 +31,18 @@ import kotlin.math.log10
 import kotlin.math.sqrt
 
 private const val TAG = "GuardianAudio"
+
+/**
+ * The pre-roll the speaker check runs against.
+ *
+ * Tied to [SherpaSpeakerIdentifier.EMBED_WINDOW_SAMPLES] rather than chosen here: an
+ * embedding of a different length than the enrolled voiceprint cannot be compared to it,
+ * so a pre-roll of its own size would reject the enrolled user on every wake.
+ *
+ * Top-level so a test can assert the two agree, which is the regression that would
+ * otherwise be invisible.
+ */
+const val PREROLL_SAMPLES = SherpaSpeakerIdentifier.EMBED_WINDOW_SAMPLES
 
 /** What the session is doing, so the service and UI agree. */
 enum class SessionPhase { Idle, Waiting, Recording }
@@ -79,8 +92,43 @@ class GuardianAudioSession(
     private var job: Job? = null
     private var recordingStartedAt = 0L
 
-    /** Loads the models. Returns false when the wake-word model is missing. */
-    suspend fun prepare(wakePhrase: String): Boolean {
+    /** True when a detection must also match the enrolled voiceprint. */
+    private var verifySpeaker = false
+
+    /**
+     * The last [PREROLL_SAMPLES] of audio, kept while waiting.
+     *
+     * The speaker check needs the audio that *contained* the phrase, and by the time the
+     * spotter reports a detection that audio is already behind us — a keyword decoder
+     * only knows it heard something once the phrase has finished. Without a pre-roll the
+     * only thing left to verify against is whatever the user said next, which is usually
+     * silence.
+     *
+     * It is a fixed-size ring that overwrites itself continuously and is never written to
+     * disk, which is exactly the promise the onboarding screen makes.
+     */
+    private val preroll = FloatArray(PREROLL_SAMPLES)
+    private var prerollWrite = 0
+    private var prerollFilled = 0
+
+    /** Accumulates audio during recording so speakers can be labelled window by window. */
+    private val speakerWindow = FloatArray(SPEAKER_WINDOW_SAMPLES)
+    private var speakerFilled = 0
+    private var taggerFilled = 0
+
+    /**
+     * Loads the models. Returns false when the wake-word model is missing.
+     *
+     * @param voiceprint the enrolled user's embedding, or null if she has not enrolled.
+     * @param requireVoiceMatch whether a detection must also match [voiceprint]. Ignored
+     *   when there is no voiceprint to match against — a gate with nothing behind it
+     *   would silently stop the wake word working for everyone, including her.
+     */
+    suspend fun prepare(
+        wakePhrase: String,
+        voiceprint: FloatArray? = null,
+        requireVoiceMatch: Boolean = false,
+    ): Boolean {
         val detectorReady = detector.load()
         if (detectorReady && !detector.setWakePhrase(wakePhrase)) {
             Log.w(TAG, "Wake phrase \"$wakePhrase\" is not expressible in the model vocabulary")
@@ -89,7 +137,18 @@ class GuardianAudioSession(
         // audio-only rather than preventing hands-free activation altogether.
         transcriber.load()
         tagger.load()
-        speakers.load()
+        val speakersReady = speakers.load()
+        speakers.enrolledVoiceprint = voiceprint
+
+        verifySpeaker = requireVoiceMatch && voiceprint != null && speakersReady
+        if (requireVoiceMatch && !verifySpeaker) {
+            Log.w(
+                TAG,
+                "Voice matching requested but unavailable " +
+                    "(voiceprint=${voiceprint != null}, model=$speakersReady) — " +
+                    "the wake word will fire for any voice",
+            )
+        }
         return detectorReady
     }
 
@@ -102,10 +161,21 @@ class GuardianAudioSession(
         }
     }
 
-    fun stop() {
-        job?.cancel()
+    /**
+     * Stops capturing and flushes whatever speech was still buffered.
+     *
+     * Suspends until the flush completes, rather than launching it. Launching was a bug:
+     * the flush decodes on another thread while [release] frees the recogniser it is
+     * decoding with, which crashed the process natively on the disarm path. Teardown has
+     * to be ordered, and the only way to order it is to wait.
+     */
+    suspend fun stop() {
+        job?.cancelAndJoin()
         job = null
-        scope.launch { transcriber.finish() }
+        // Trailing speech still belongs in the transcript — a session that ends
+        // mid-sentence should keep what was said.
+        runCatching { transcriber.finish() }
+            .onFailure { Log.w(TAG, "Flushing the transcript failed", it) }
         _state.value = SessionState(phase = SessionPhase.Idle)
     }
 
@@ -114,7 +184,13 @@ class GuardianAudioSession(
         beginRecording(reason)
     }
 
-    fun release() {
+    /**
+     * Frees every model. The session cannot be reused afterwards.
+     *
+     * Suspends because [stop] does: the models must not be released until the capture
+     * loop has stopped and the final flush has finished using them.
+     */
+    suspend fun release() {
         stop()
         detector.close()
         transcriber.close()
@@ -159,7 +235,6 @@ class GuardianAudioSession(
         val floats = FloatArray(BUFFER_SAMPLES)
         // YAMNet wants a fixed 0.975 s frame, so buffers accumulate until one is full.
         val taggerWindow = FloatArray(tagger.windowSamples)
-        var taggerFilled = 0
 
         try {
             recorder.startRecording()
@@ -171,28 +246,7 @@ class GuardianAudioSession(
                 for (i in 0 until read) floats[i] = shorts[i] / Short.MAX_VALUE.toFloat()
                 val buffer = if (read == floats.size) floats else floats.copyOf(read)
 
-                when (_state.value.phase) {
-                    SessionPhase.Waiting -> {
-                        detector.accept(buffer)?.let { keyword ->
-                            Log.i(TAG, "Wake word detected: $keyword")
-                            onWakeWord(keyword)
-                            beginRecording(keyword)
-                        }
-                    }
-
-                    SessionPhase.Recording -> {
-                        transcriber.accept(buffer)
-
-                        taggerFilled = fillTaggerWindow(taggerWindow, taggerFilled, buffer)
-                        if (taggerFilled >= taggerWindow.size) {
-                            val events = tagger.tag(taggerWindow, elapsedMillis())
-                            if (events.isNotEmpty()) onEvents(events, buffer)
-                            taggerFilled = 0
-                        }
-                    }
-
-                    SessionPhase.Idle -> Unit
-                }
+                route(buffer, taggerWindow)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Capture loop failed", e)
@@ -201,6 +255,112 @@ class GuardianAudioSession(
             recorder.release()
             Log.i(TAG, "Capture stopped")
         }
+    }
+
+    /**
+     * Routes one buffer according to the current phase.
+     *
+     * Split out of the capture loop so the phase transition — the whole feature — can be
+     * driven from a test with recorded audio instead of a microphone. The loop does
+     * nothing but read bytes and hand them here.
+     */
+    internal fun route(buffer: FloatArray, taggerWindow: FloatArray) {
+        when (_state.value.phase) {
+            SessionPhase.Waiting -> {
+                // Before matching, so the phrase is in the ring by the time a detection
+                // comes back.
+                appendPreroll(buffer)
+
+                detector.accept(buffer)?.let { keyword ->
+                    if (acceptDetection(keyword)) {
+                        Log.i(TAG, "Wake word detected: $keyword")
+                        onWakeWord(keyword)
+                        beginRecording(keyword)
+                    }
+                }
+            }
+
+            SessionPhase.Recording -> {
+                transcriber.accept(buffer)
+
+                taggerFilled = fillTaggerWindow(taggerWindow, taggerFilled, buffer)
+                if (taggerFilled >= taggerWindow.size) {
+                    val events = tagger.tag(taggerWindow, elapsedMillis())
+                    if (events.isNotEmpty()) onEvents(events, buffer)
+                    taggerFilled = 0
+                }
+
+                speakerFilled = fillTaggerWindow(speakerWindow, speakerFilled, buffer)
+                if (speakerFilled >= speakerWindow.size) {
+                    // Feeds unknownVoicePresent and speakerCount, which the reasoning
+                    // tier weighs. Without this they were always "one known speaker",
+                    // however many people were talking.
+                    speakers.labelSpeaker(speakerWindow)
+                    speakerFilled = 0
+                }
+            }
+
+            SessionPhase.Idle -> Unit
+        }
+    }
+
+    /** Puts the session into [SessionPhase.Waiting] without opening the microphone. */
+    internal fun armForTest() {
+        _state.value = SessionState(phase = SessionPhase.Waiting)
+    }
+
+    /**
+     * Whether a detection should start a recording.
+     *
+     * When voice matching is on, the phrase being right is not enough — it also has to
+     * have been *her*. The check runs against the pre-roll, and a failure is dropped
+     * quietly: someone else saying her wake word should look to them like nothing
+     * happened at all.
+     *
+     * If there is not yet enough pre-roll to judge — a detection within the first second
+     * of arming — the detection is allowed through. Refusing it would mean the wake word
+     * does not work for a second after arming, which is the moment it is most likely to
+     * be needed.
+     */
+    private fun acceptDetection(keyword: String): Boolean {
+        if (!verifySpeaker) return true
+
+        val recent = prerollSnapshot()
+        if (recent == null) {
+            Log.i(TAG, "Not enough audio to verify the speaker; accepting \"$keyword\"")
+            return true
+        }
+        if (speakers.matchesEnrolledUser(recent)) return true
+
+        Log.i(TAG, "Ignored \"$keyword\" — the voice did not match the enrolled user")
+        return false
+    }
+
+    /** Writes [buffer] into the pre-roll ring, overwriting the oldest audio. */
+    private fun appendPreroll(buffer: FloatArray) {
+        for (sample in buffer) {
+            preroll[prerollWrite] = sample
+            prerollWrite = (prerollWrite + 1) % preroll.size
+        }
+        prerollFilled = (prerollFilled + buffer.size).coerceAtMost(preroll.size)
+    }
+
+    /**
+     * The pre-roll in chronological order, or null until the ring has filled.
+     *
+     * Deliberately all-or-nothing: a partial ring would embed a shorter window, and a
+     * shorter window cannot be compared to the enrolled voiceprint. Better to let the
+     * detection through unverified for the first second and a half after arming — see
+     * [acceptDetection] — than to reject the user on a meaningless comparison.
+     */
+    private fun prerollSnapshot(): FloatArray? {
+        if (prerollFilled < preroll.size) return null
+        // Unwrap from the write cursor, which is the oldest sample.
+        val out = FloatArray(preroll.size)
+        val tail = preroll.size - prerollWrite
+        preroll.copyInto(out, 0, prerollWrite, preroll.size)
+        preroll.copyInto(out, tail, 0, prerollWrite)
+        return out
     }
 
     /** Slides [buffer] into the fixed tagger window, returning the new fill level. */
@@ -214,6 +374,9 @@ class GuardianAudioSession(
     private fun beginRecording(trigger: String) {
         recordingStartedAt = System.currentTimeMillis()
         speakers.resetSession()
+        prerollFilled = 0
+        prerollWrite = 0
+        speakerFilled = 0
         _state.value = _state.value.copy(
             phase = SessionPhase.Recording,
             triggeredBy = trigger,
@@ -272,6 +435,9 @@ class GuardianAudioSession(
     private companion object {
         /** 100 ms at 16 kHz — small enough to keep wake-word latency low. */
         const val BUFFER_SAMPLES = SAMPLE_RATE / 10
+        /** Speaker-labelling windows, the same length for the same reason. */
+        const val SPEAKER_WINDOW_SAMPLES = SherpaSpeakerIdentifier.EMBED_WINDOW_SAMPLES
+
         const val TRANSCRIPT_WINDOW = 20
         const val EVENT_WINDOW = 12
         const val NEUTRAL_LOCATION_SCORE = 85

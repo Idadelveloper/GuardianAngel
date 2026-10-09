@@ -127,6 +127,11 @@ fun CodewordSetupScreen(
             if (isLast) onComplete(phrases.toMap()) else index++
         },
         ctaEnabled = canAdvance,
+        // Skipping leaves setup with whatever has been entered so far, rather than
+        // stepping past one tier: a user who wants out of this screen wants out of the
+        // wizard, not four taps of the same decision.
+        skipLabel = if (canAdvance) "Finish with what I've set" else "Set codewords later",
+        onSkip = { onComplete(phrases.toMap()) },
     ) {
         AngelSays(
             message = "These come after your wake word. Once I'm recording, say one of " +

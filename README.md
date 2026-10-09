@@ -116,6 +116,17 @@ app states them plainly rather than implying capabilities it cannot have:
   SoundTrigger HAL, which are reserved for the device's default assistant. The UI says
   so instead of pretending otherwise.
 
+Permission state is read from the system on every status emission rather than cached, so
+a permission granted during onboarding is never asked for again on Home, and one revoked
+in system settings shows up immediately. Caching it was a real bug: every fresh process
+started by assuming nothing was granted.
+
+A **Not set up yet** card sits above the hands-free card whenever a capability is
+missing. Onboarding steps are all skippable, which makes this necessary rather than
+decorative — a skipped step otherwise leaves the app silently unable to do part of its
+job. It shows the single most consequential gap (no guardian beats no location beats no
+voiceprint) with one button that fixes it, and keeps the rest behind a tap.
+
 The home screen's **Hands-free** card is where this lives: it arms listening, names the
 wake word while armed, and lists any missing permission with the one action that fixes
 it. A listening feature that silently does nothing because a permission was declined is
@@ -443,17 +454,22 @@ three home states, both map states and the four onboarding steps.
 - [x] Speech-stack architecture — tiered pipeline, all seams, heuristic reasoning tier
 - [x] sherpa-onnx integrated; ASR, wake word, VAD and speaker models in place
 - [x] Wake word on sherpa KWS — Apache-2.0, open vocabulary, verified loading on device
-- [x] Wake word wired end to end — detection starts a recording session
+- [x] Wake word wired end to end — detection starts a recording session, proven on
+      device by feeding recorded speech through the real capture path
 - [x] YAMNet audio tagging — loading on device, danger classes mapped
 - [x] sherpa-backed transcriber (VAD + Moonshine) and speaker diarization
 - [ ] APK size: move models to first-run download or Play Asset Delivery
-- [ ] Speaker verification so only your voice wakes Angel (the toggle already exists)
+- [x] Speaker verification so only your voice wakes Angel — enrolment records real
+      audio, the voiceprint is CAM++ and encrypted at rest, and the gate engages only
+      when the voiceprint is consistent enough to trust
 - [ ] LLM-backed reasoning for the ambiguous severity band
 - [x] Room database — twelve tables, exported schemas, Keystore-encrypted secrets
 - [x] Anonymous accounts, with email/password and phone linking ready for Firebase
 - [x] Opt-in cloud backup that cannot upload transcripts
 - [x] Contact picker, and real runtime permission requests in onboarding
-- [ ] Room-back the remaining repositories (sessions, analytics, routes)
+- [ ] Room-back the remaining repositories (sessions, analytics, routes) — the home
+      snapshot is still sample content, which is why the setup card reads live state
+      from the repositories that are real rather than from the snapshot
 - [ ] SQLCipher for the whole database, not just the credential columns
 - [ ] Real Maps SDK behind `RouteCanvas`, plus live location
 - [ ] Speech recognition, diarisation and on-device codeword spotting

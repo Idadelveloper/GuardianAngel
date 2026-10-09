@@ -6,6 +6,7 @@ import com.example.guardianangel.domain.model.ListeningState
 import com.example.guardianangel.domain.model.ListeningStatus
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.domain.repository.PermissionProbe
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -21,9 +22,18 @@ import kotlinx.coroutines.flow.combine
  */
 class RoomListeningRepository(
     private val wakeWordStore: RoomWakeWordStore,
+    private val permissions: PermissionProbe,
 ) : ListeningRepository {
 
-    private val permissions = MutableStateFlow(PermissionSnapshot())
+    /**
+     * Bumped to re-emit the status after something that changes permissions invisibly.
+     *
+     * The probe is read inside the combine rather than cached, so the *first* value a
+     * collector sees already reflects the system. This exists only because granting a
+     * permission is not itself observable — nothing in app state changes when the user
+     * taps Allow.
+     */
+    private val permissionGeneration = MutableStateFlow(0)
     private val detectorReady = MutableStateFlow(false)
     private val state = MutableStateFlow(ListeningState.Off)
 
@@ -32,15 +42,17 @@ class RoomListeningRepository(
     override fun observeStatus(): Flow<ListeningStatus> =
         combine(
             wakeWordStore.observe(),
-            permissions,
+            permissionGeneration,
             detectorReady,
             state,
-        ) { word, perms, ready, current ->
+        ) { word, _, ready, current ->
             val blocked = buildList {
-                if (!perms.microphone) add(ListeningRequirement.MicrophonePermission)
-                if (!perms.notifications) add(ListeningRequirement.NotificationPermission)
+                if (!permissions.hasMicrophone()) add(ListeningRequirement.MicrophonePermission)
+                if (!permissions.hasNotifications()) {
+                    add(ListeningRequirement.NotificationPermission)
+                }
                 if (!word.isEnrolled) add(ListeningRequirement.WakeWordEnrolled)
-                if (!perms.batteryExempt) add(ListeningRequirement.BatteryExemption)
+                if (!permissions.isBatteryExempt()) add(ListeningRequirement.BatteryExemption)
             }
             ListeningStatus(
                 // Derived, never stored: the UI must not be able to claim it is
@@ -60,6 +72,9 @@ class RoomListeningRepository(
         state.value = ListeningState.Off
     }
 
+    override suspend fun canUseWakePhrase(phrase: String): Boolean =
+        wakeWordStore.canRepresent(phrase)
+
     override suspend fun addEnrolmentTake() = wakeWordStore.addVoiceSample()
 
     override suspend fun clearEnrolment() = wakeWordStore.clearVoiceSamples()
@@ -70,12 +85,8 @@ class RoomListeningRepository(
     override suspend fun setSensitivity(sensitivity: ListeningSensitivity) =
         wakeWordStore.setSensitivity(sensitivity)
 
-    override suspend fun updatePermissions(
-        microphone: Boolean,
-        notifications: Boolean,
-        batteryExempt: Boolean,
-    ) {
-        permissions.value = PermissionSnapshot(microphone, notifications, batteryExempt)
+    override suspend fun refreshPermissions() {
+        permissionGeneration.value += 1
     }
 
     override suspend fun setDetectorReady(ready: Boolean) {
@@ -93,10 +104,4 @@ class RoomListeningRepository(
     override suspend fun onWakeWordDetected() {
         state.value = ListeningState.Triggered
     }
-
-    private data class PermissionSnapshot(
-        val microphone: Boolean = false,
-        val notifications: Boolean = false,
-        val batteryExempt: Boolean = false,
-    )
 }
