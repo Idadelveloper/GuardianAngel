@@ -35,6 +35,9 @@ import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private const val TAG = "DatabaseContainer"
@@ -65,13 +68,15 @@ class DatabaseAppContainer(
      * tokens at save time. Null when no model is installed; the wake word is still
      * stored, just without tokens, and the spotter reports itself unavailable.
      */
-    private val tokenizer: SentencePieceTokenizer? = runCatching {
-        SentencePieceTokenizer.fromAssets(
-            context.assets,
-            "sherpa-onnx-kws-zipformer-gigaspeech/bpe.model",
-        )
-    }.onFailure { Log.i(TAG, "No keyword vocabulary; wake phrases will not be tokenised") }
-        .getOrNull()
+    private val tokenizer: SentencePieceTokenizer? by lazy {
+        runCatching {
+            SentencePieceTokenizer.fromAssets(
+                context.assets,
+                "sherpa-onnx-kws-zipformer-gigaspeech/bpe.model",
+            )
+        }.onFailure { Log.i(TAG, "No keyword vocabulary; wake phrases will not be tokenised") }
+            .getOrNull()
+    }
 
     override val authRepository: AuthRepository =
         if (FirebaseAvailability.isConfigured(context)) {
@@ -83,7 +88,7 @@ class DatabaseAppContainer(
     private val wakeWordStore = RoomWakeWordStore(
         dao = database.wakeWordDao(),
         currentUser = currentUser,
-        tokenizer = tokenizer,
+        tokenizerProvider = { tokenizer },
     )
 
     override val voiceProfileRepository: VoiceProfileRepository =
@@ -100,6 +105,18 @@ class DatabaseAppContainer(
     )
 
     override suspend fun currentUserId(): String = currentUser.requireId()
+
+    /**
+     * True once this device has an account row, signed in or not.
+     *
+     * Read through the DAO rather than the auth state because a signed-out account still
+     * exists — that is the difference between showing a returning user the log-in screen
+     * and showing her a sign-up form.
+     */
+    override fun observeHasAccount(): kotlinx.coroutines.flow.Flow<Boolean> =
+        database.userDao().observeAccountCount()
+            .map { it > 0 }
+            .distinctUntilChanged()
 
     override val permissionProbe: PermissionProbe = AndroidPermissionProbe(context)
 
@@ -124,6 +141,12 @@ class DatabaseAppContainer(
     override val routeRepository: RouteRepository = FakeRouteRepository()
     override val activityRepository: ActivityRepository = FakeActivityRepository()
 
+    override val crimeDataService = com.example.guardianangel.data.crime.CrimeDataService()
+    override val locationTracker = com.example.guardianangel.data.platform.LocationTracker(context)
+    override val angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator by lazy {
+        com.example.guardianangel.agent.AngelAgentOrchestrator(crimeDataService, scope)
+    }
+
     /**
      * Signs in and seeds a new account.
      *
@@ -135,14 +158,35 @@ class DatabaseAppContainer(
         scope.launch {
             when (val result = authRepository.ensureSignedIn()) {
                 is com.example.guardianangel.domain.repository.AuthResult.Success -> {
-                    ensureUserRow(result.user)
-                    roomCodewords.seedDefaults(result.user.id)
-                    Log.i(TAG, "Signed in as ${result.user.id} (${result.user.provider})")
+                    onAuthenticated(result.user)
+                    Log.i(TAG, "Resumed session for ${result.user.id} (${result.user.provider})")
                 }
                 is com.example.guardianangel.domain.repository.AuthResult.Failure ->
-                    Log.e(TAG, "Sign-in failed: ${result.message}")
+                    // Not an error: no session means the auth gate is about to be shown.
+                    Log.i(TAG, "No session to resume (${result.message})")
             }
         }
+    }
+
+    /**
+     * Prepares the local database for a freshly authenticated account.
+     *
+     * Called on session resume *and* straight after sign-up or sign-in from the UI,
+     * because an account can now come into existence either way. Idempotent, so running
+     * it twice for the same user is harmless.
+     *
+     * Note what it deliberately does **not** do: set a wake word, or claim voice
+     * enrolment. An earlier version seeded a phrase and three fake enrolment takes, which
+     * made a brand-new account report hands-free as configured and silenced the prompt
+     * telling the user to set it up. Codewords are seeded because the four tiers must
+     * never be empty, but they are flagged as suggestions rather than choices — see
+     * `CodewordEntity.isCustomised`.
+     */
+    override suspend fun onAuthenticated(
+        user: com.example.guardianangel.domain.repository.AuthUser,
+    ) {
+        ensureUserRow(user)
+        roomCodewords.seedDefaults(user.id)
     }
 
     /**

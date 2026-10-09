@@ -46,7 +46,8 @@ import kotlinx.coroutines.launch
 fun PermissionsRoute(
     repository: AccountRepository,
     listeningRepository: ListeningRepository,
-    onBack: () -> Unit,
+    /** Null on the first wizard step — there is nothing behind it but the auth gate. */
+    onBack: (() -> Unit)?,
     onContinue: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -68,7 +69,7 @@ fun PermissionsRoute(
 
 @Composable
 fun PermissionsScreen(
-    onBack: () -> Unit,
+    onBack: (() -> Unit)?,
     onGrant: (location: Boolean, microphone: Boolean, notifications: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -101,6 +102,11 @@ fun PermissionsScreen(
         lifecycleOwner.lifecycle.addObserver(observer)
     }
 
+    // Everything recording depends on. Notifications are included because Android
+    // requires a visible notification for a background microphone service, so without it
+    // hands-free cannot run at all.
+    val allGranted = microphone && notifications && location
+
     /** Asks for anything still missing. Android ignores already-granted entries. */
     fun request() {
         val wanted = buildList {
@@ -118,36 +124,37 @@ fun PermissionsScreen(
         stepLabel = "Step 1 of 5 · Permissions",
         progress = 0.2f,
         onBack = onBack,
-        ctaLabel = if (microphone && notifications) "Continue" else "Grant permissions",
+        // Location joins the required set: recording is gated on it, because an alert
+        // that cannot say where she is leaves her guardians with an emergency and no
+        // address.
+        ctaLabel = if (allGranted) "Continue" else "Grant permissions",
         onCta = {
-            if (microphone && notifications) {
-                onGrant(location, microphone, notifications)
-            } else {
-                request()
-            }
+            if (allGranted) onGrant(location, microphone, notifications) else request()
         },
-        // Location is genuinely optional — Angel can still listen and record without
-        // it, she just cannot tell guardians where to go. Blocking setup on it would
-        // turn a degraded feature into no app at all.
+        // Never disabled: the button asks for whatever is still missing, and a dead
+        // button with no explanation is worse than one that opens a dialog.
         ctaEnabled = true,
         // Skipping is allowed, but named for what it costs rather than as a neutral
-        // "later": without the microphone there is no hands-free activation at all, and
-        // a user who skips should know that now rather than discover it on a dark street.
-        skipLabel = if (microphone && notifications) null else "Skip — no hands-free for now",
-        onSkip = { onGrant(location, microphone, notifications) }
-            .takeIf { !(microphone && notifications) },
+        // "later". Everything spoken depends on the microphone, and recording depends on
+        // location, so a user who skips should learn that here and not on a dark street.
+        skipLabel = if (allGranted) null else "Skip — recording won't work yet",
+        onSkip = { onGrant(location, microphone, notifications) }.takeIf { !allGranted },
     ) {
         AngelSays(
-            message = "To watch your route and listen for your codewords, I need two " +
-                "permissions. You can turn either off at any time.",
-            mood = AngelMood.Resting,
+            message = if (allGranted) {
+                "That's everything I need. You can turn any of these off later."
+            } else {
+                "To hear you and to tell your guardians where you are, I need these " +
+                    "three. You can turn any of them off at any time."
+            },
+            mood = if (allGranted) AngelMood.Sanctuary else AngelMood.Resting,
         )
 
         ToggleCard(
             icon = GuardianIcons.MapPin,
             title = "Location",
-            description = "Lets me check street lighting on your route and know when " +
-                "you've reached a safe haven.",
+            description = "So an alert can say where you are. Without it I can tell your " +
+                "guardians something is wrong but not where to go, so recording stays off.",
             checked = location,
             onCheckedChange = { request() },
             modifier = Modifier.fillMaxWidth(),

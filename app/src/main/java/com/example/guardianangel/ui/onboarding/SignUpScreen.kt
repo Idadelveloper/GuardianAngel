@@ -24,8 +24,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.guardianangel.data.FakeAccountRepository
-import com.example.guardianangel.domain.repository.AccountRepository
+import com.example.guardianangel.di.AppContainer
+import com.example.guardianangel.domain.repository.AuthResult
+import com.example.guardianangel.ui.auth.AuthFormState
+import com.example.guardianangel.ui.auth.MIN_PASSWORD_LENGTH
+import com.example.guardianangel.ui.auth.looksLikeEmail
 import com.example.guardianangel.ui.components.GuardianTextField
 import com.example.guardianangel.ui.components.GuardianTextLink
 import com.example.guardianangel.ui.components.GuardianWizardScaffold
@@ -38,23 +41,66 @@ import kotlinx.coroutines.launch
 /**
  * Step 0 — create an account and meet Angel.
  *
- * Deliberately the shortest form the product can get away with: a name, a number and a
+ * Deliberately the shortest form the product can get away with: a name, an email and a
  * passphrase. The design brief asks for Partiful-level friction, and every extra field
  * here is one more reason to abandon setup for a safety app you have not needed yet.
+ *
+ * Email rather than a phone number because that is what both back ends can actually
+ * authenticate: Firebase email/password, and a Keystore-encrypted hash on a device with
+ * no Firebase project. The old form collected a mobile number, implied an SMS code, and
+ * sent neither — it wrote the number to the profile and let anyone straight in.
  */
 @Composable
 fun SignUpRoute(
-    repository: AccountRepository,
+    container: AppContainer,
     onContinue: () -> Unit,
+    onLogIn: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    var form by remember { mutableStateOf(AuthFormState()) }
+
     SignUpScreen(
         modifier = modifier,
-        onSubmit = { name, phone, password ->
+        form = form,
+        onSubmit = { name, email, password ->
+            form = form.copy(isSubmitting = true, error = null)
             scope.launch {
-                repository.createAccount(name, phone, password)
-                onContinue()
+                val result = container.authRepository.signUpWithEmail(name, email, password)
+                when (result) {
+                    is AuthResult.Success -> {
+                        container.onAuthenticated(result.user)
+                        // Mirrors the name onto the profile the settings screens read and
+                        // moves the wizard past sign-up, so a reopened app resumes here.
+                        container.accountRepository.createAccount(name, "", password)
+                        form = form.copy(isSubmitting = false)
+                        onContinue()
+                    }
+
+                    is AuthResult.Failure ->
+                        form = form.copy(isSubmitting = false, error = result.message)
+                }
+            }
+        },
+        onLogIn = onLogIn,
+        onSkip = {
+            // Keeps the original safety property alive behind the gate: a woman
+            // downloading this at 11pm should be able to arm a panic button before she
+            // is asked for an email address. She can add credentials later from
+            // Settings, and the anonymous account is upgraded in place rather than
+            // replaced, so nothing set up now is lost.
+            form = form.copy(isSubmitting = true, error = null)
+            scope.launch {
+                when (val result = container.authRepository.signInAnonymously()) {
+                    is AuthResult.Success -> {
+                        container.onAuthenticated(result.user)
+                        form = form.copy(isSubmitting = false)
+                        onContinue()
+                    }
+
+                    is AuthResult.Failure ->
+                        form = form.copy(isSubmitting = false, error = result.message)
+                }
             }
         },
     )
@@ -62,30 +108,38 @@ fun SignUpRoute(
 
 @Composable
 fun SignUpScreen(
-    onSubmit: (name: String, phone: String, password: String) -> Unit,
+    onSubmit: (name: String, email: String, password: String) -> Unit,
+    onLogIn: () -> Unit,
     modifier: Modifier = Modifier,
+    form: AuthFormState = AuthFormState(),
+    onSkip: (() -> Unit)? = null,
 ) {
     var name by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
 
     val strength = remember(password) { passwordStrength(password) }
-    val canSubmit = name.isNotBlank() && phone.length >= 7 && password.length >= 8
+    val canSubmit = name.isNotBlank() &&
+        looksLikeEmail(email) &&
+        password.length >= MIN_PASSWORD_LENGTH &&
+        !form.isSubmitting
 
     GuardianWizardScaffold(
         modifier = modifier,
         stepLabel = "Create your account",
         progress = 0f,
         onBack = null,
-        ctaLabel = "Create account",
-        onCta = { onSubmit(name.trim(), phone.trim(), password) },
+        ctaLabel = if (form.isSubmitting) "Creating…" else "Create account",
+        onCta = { onSubmit(name.trim(), email.trim(), password) },
         ctaEnabled = canSubmit,
+        skipLabel = "Set up without an account".takeIf { onSkip != null },
+        onSkip = onSkip,
         footer = {
             GuardianTextLink(
                 prefix = "Already have an account?",
                 linkLabel = "Log in",
-                onClick = { /* Login flow is not part of this build. */ },
+                onClick = onLogIn,
             )
         },
     ) {
@@ -105,13 +159,14 @@ fun SignUpScreen(
         )
 
         GuardianTextField(
-            value = phone,
-            onValueChange = { phone = it.filter { c -> c.isDigit() || c in "+() -" } },
-            label = "Mobile number",
-            placeholder = "(555) 392-8174",
-            leadingIcon = GuardianIcons.Phone,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            supportingText = "We text a code to verify it's you.",
+            value = email,
+            onValueChange = { email = it },
+            label = "Email",
+            placeholder = "you@example.com",
+            leadingIcon = GuardianIcons.Users,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+            isError = form.error != null,
+            supportingText = form.error ?: "Used to get back in on a new phone.",
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -119,8 +174,8 @@ fun SignUpScreen(
             GuardianTextField(
                 value = password,
                 onValueChange = { password = it },
-                label = "Master password",
-                placeholder = "Create a strong passphrase",
+                label = "Password",
+                placeholder = "At least $MIN_PASSWORD_LENGTH characters",
                 leadingIcon = GuardianIcons.Lock,
                 trailingIcon = if (passwordVisible) GuardianIcons.EyeOff else GuardianIcons.Eye,
                 onTrailingIconClick = { passwordVisible = !passwordVisible },
@@ -210,5 +265,7 @@ private fun PasswordStrengthMeter(strength: Int) {
 @Preview(showBackground = true, device = "id:pixel_8", heightDp = 1200)
 @Composable
 private fun SignUpPreview() {
-    GuardianAngelTheme { SignUpScreen(onSubmit = { _, _, _ -> }) }
+    GuardianAngelTheme {
+        SignUpScreen(onSubmit = { _, _, _ -> }, onLogIn = {}, onSkip = {})
+    }
 }

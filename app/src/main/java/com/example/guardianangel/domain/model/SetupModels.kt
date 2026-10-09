@@ -20,6 +20,13 @@ enum class GuardianCapability(
     /** Label for the button that fixes it. */
     val fixLabel: String,
 ) {
+    MicrophoneAccess(
+        summary = "Hear you at all",
+        missingDetail = "Without the microphone I can't listen for your wake word or " +
+            "record anything. This is the one I can't work around.",
+        fixLabel = "Allow microphone",
+    ),
+
     HandsFree(
         summary = "Wake me by saying your phrase",
         missingDetail = "Without a wake word I can only start recording when you tap. " +
@@ -43,9 +50,9 @@ enum class GuardianCapability(
 
     CodewordActions(
         summary = "Act on what you say while recording",
-        missingDetail = "Codewords are how you tell me what to do once I'm recording — " +
-            "check in, alert your circle, call for help. Without them I record, and " +
-            "nothing else.",
+        missingDetail = "You're still on my suggested codewords. Pick your own — they " +
+            "need to be words you'd remember under pressure but wouldn't say by " +
+            "accident.",
         fixLabel = "Set codewords",
     ),
 
@@ -83,10 +90,12 @@ data class GuardianSetup(
 
     private companion object {
         val PRIORITY = listOf(
+            // The microphone first: without it nothing else in this list does anything.
+            GuardianCapability.MicrophoneAccess,
             GuardianCapability.GuardianAlerts,
+            GuardianCapability.LocationSharing,
             GuardianCapability.CodewordActions,
             GuardianCapability.HandsFree,
-            GuardianCapability.LocationSharing,
             GuardianCapability.VoiceMatch,
         )
     }
@@ -107,15 +116,21 @@ fun guardianSetup(
     hasWakeWord: Boolean,
     voiceprintUsable: Boolean,
     hasLocationPermission: Boolean,
-    codewordCount: Int,
+    hasMicrophonePermission: Boolean,
+    customisedCodewordCount: Int,
     guardianCount: Int,
 ): GuardianSetup = GuardianSetup(
     ready = buildSet {
-        if (hasWakeWord) add(GuardianCapability.HandsFree)
+        // The microphone is the floor for everything spoken. Without it a wake word is
+        // a phrase nothing is listening for.
+        if (hasMicrophonePermission) add(GuardianCapability.MicrophoneAccess)
+        if (hasWakeWord && hasMicrophonePermission) add(GuardianCapability.HandsFree)
         // Pointless without a wake word to gate, so it depends on both.
         if (hasWakeWord && voiceprintUsable) add(GuardianCapability.VoiceMatch)
         if (hasLocationPermission) add(GuardianCapability.LocationSharing)
-        if (codewordCount > 0) add(GuardianCapability.CodewordActions)
+        // Counts only phrases the user chose. Counting rows instead reported a
+        // brand-new account's four suggestions as configured codewords.
+        if (customisedCodewordCount > 0) add(GuardianCapability.CodewordActions)
         if (guardianCount > 0) add(GuardianCapability.GuardianAlerts)
     }
 )

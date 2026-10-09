@@ -14,6 +14,16 @@ import com.example.guardianangel.ui.icons.GuardianIcons
 object Routes {
 
     /** The onboarding wizard — no bottom bar. */
+    /**
+     * Where a returning user lands.
+     *
+     * A sibling of [SIGN_UP] rather than a step inside onboarding, because the two have
+     * different lifetimes: onboarding is a wizard that can be skipped step by step and
+     * resumed, while authentication is a gate that is either passed or not — and once
+     * passed, must never reappear.
+     */
+    const val LOG_IN = "auth/log-in"
+
     const val ONBOARDING_GRAPH = "onboarding"
     const val SIGN_UP = "onboarding/sign-up"
     const val PERMISSIONS = "onboarding/permissions"

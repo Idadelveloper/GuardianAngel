@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -89,6 +90,7 @@ fun HomeRoute(
     contactsRepository: ContactsRepository,
     voiceProfiles: VoiceProfileRepository,
     permissions: PermissionProbe,
+    angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator? = null,
     onOpenSession: (String) -> Unit,
     onPlanRoute: () -> Unit,
     onSetUpWakeWord: () -> Unit,
@@ -106,6 +108,9 @@ fun HomeRoute(
     val wakeWord by listeningRepository.observeWakeWord()
         .collectAsStateWithLifecycle(initialValue = WakeWord(phrase = ""))
 
+    val angelState by (angelOrchestrator?.state ?: kotlinx.coroutines.flow.MutableStateFlow(com.example.guardianangel.agent.AngelPerceptionState()))
+        .collectAsStateWithLifecycle()
+
     // Deliberately from the repositories that hold real rows, not from the snapshot:
     // the snapshot is still sample content, and a setup card built on samples would
     // reassure the user about things she has not actually set up.
@@ -122,7 +127,9 @@ fun HomeRoute(
         // Read through the probe so a permission granted in onboarding is reflected on
         // the first frame, rather than after a resume.
         hasLocationPermission = permissions.hasLocation(),
-        codewordCount = codewords.size,
+        hasMicrophonePermission = permissions.hasMicrophone(),
+        // Only phrases she chose. The four seeded suggestions are not setup.
+        customisedCodewordCount = codewords.count { it.isCustomised },
         guardianCount = guardians.size,
     )
 
@@ -130,20 +137,36 @@ fun HomeRoute(
         state = state,
         listeningStatus = listeningStatus,
         wakeWord = wakeWord,
+        isAmberAlertActive = angelState.isAmberAlertActive,
+        amberRationale = angelState.activeDecisions.firstOrNull() ?: "Extreme threat corroboration detected",
+        onDismissAmber = { angelOrchestrator?.dismissAmberAlert() },
         onAction = viewModel::onAction,
         onOpenSession = onOpenSession,
         onPlanRoute = onPlanRoute,
         onArm = handsFree::arm,
         onDisarm = handsFree::disarm,
         onRecordNow = {
-            // Opens the microphone for real. Previously this action only moved the UI
-            // into its recording state, so the one control that was meant to work when
-            // hands-free failed recorded nothing at all.
-            if (handsFree.recordNow()) viewModel.onAction(HomeAction.StartRecording(null))
+            // Only show recording UI if recording actually started. Calling the action
+            // unconditionally put the screen into its recording state while a permission
+            // dialog was still up and nothing was being captured — the worst possible
+            // thing for this app to be wrong about.
+            if (handsFree.recordNow().isStarted) {
+                viewModel.onAction(HomeAction.StartRecording(null))
+            }
+        },
+        onStopRecording = {
+            handsFree.stopRecording()
+            // Stop *and* stand down, in that order. `StopRecording` alone leaves the
+            // mode on Listening, so the badge read ACTIVE over a service that had just
+            // been stopped — the app claiming to be listening when it was not.
+            viewModel.onAction(HomeAction.StopRecording)
+            viewModel.onAction(HomeAction.DisarmGuardian)
         },
         setup = setup,
         onFixCapability = { capability ->
             when (capability) {
+                GuardianCapability.MicrophoneAccess ->
+                    handsFree.resolve(ListeningRequirement.MicrophonePermission)
                 GuardianCapability.HandsFree -> onSetUpWakeWord()
                 GuardianCapability.VoiceMatch -> onSetUpVoice()
                 GuardianCapability.LocationSharing -> handsFree.requestLocation()
@@ -170,9 +193,13 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     listeningStatus: ListeningStatus = ListeningStatus(),
     wakeWord: WakeWord = WakeWord(phrase = ""),
+    isAmberAlertActive: Boolean = false,
+    amberRationale: String = "",
+    onDismissAmber: () -> Unit = {},
     onArm: () -> Unit = {},
     onDisarm: () -> Unit = {},
     onRecordNow: () -> Unit = {},
+    onStopRecording: () -> Unit = {},
     setup: GuardianSetup = GuardianSetup(GuardianCapability.entries.toSet()),
     onFixCapability: (GuardianCapability) -> Unit = {},
     onFixBlocker: (ListeningRequirement) -> Unit = {},
@@ -183,12 +210,16 @@ fun HomeScreen(
             snapshot = state.snapshot,
             listeningStatus = listeningStatus,
             wakeWord = wakeWord,
+            isAmberAlertActive = isAmberAlertActive,
+            amberRationale = amberRationale,
+            onDismissAmber = onDismissAmber,
             onAction = onAction,
             onOpenSession = onOpenSession,
             onPlanRoute = onPlanRoute,
             onArm = onArm,
             onDisarm = onDisarm,
             onRecordNow = onRecordNow,
+            onStopRecording = onStopRecording,
             setup = setup,
             onFixCapability = onFixCapability,
             onFixBlocker = onFixBlocker,
@@ -222,12 +253,16 @@ private fun ReadyState(
     snapshot: GuardianSnapshot,
     listeningStatus: ListeningStatus,
     wakeWord: WakeWord,
+    isAmberAlertActive: Boolean,
+    amberRationale: String,
+    onDismissAmber: () -> Unit,
     onAction: (HomeAction) -> Unit,
     onOpenSession: (String) -> Unit,
     onPlanRoute: () -> Unit,
     onArm: () -> Unit,
     onDisarm: () -> Unit,
     onRecordNow: () -> Unit,
+    onStopRecording: () -> Unit,
     setup: GuardianSetup,
     onFixCapability: (GuardianCapability) -> Unit,
     onFixBlocker: (ListeningRequirement) -> Unit,
@@ -249,10 +284,45 @@ private fun ReadyState(
                 mode = snapshot.mode,
                 subtitle = snapshot.journey?.let { "Guarding ${it.corridorLabel}" }
                     ?: snapshot.safeHavenLabel?.let { "Resting at $it" },
-                onQuickAlert = { onAction(HomeAction.DispatchAlert(CodewordTier.Danger)) },
+                onToggleRecording = if (isRecording) onStopRecording else onRecordNow,
             )
         },
     ) {
+        if (isAmberAlertActive) {
+            AmberAlertBanner(
+                rationale = amberRationale,
+                onDismiss = onDismissAmber,
+                onEmergencyCall = { onAction(HomeAction.DispatchAlert(CodewordTier.Emergency)) },
+            )
+        }
+
+        // --- Recording takes over at the top ---------------------------------------
+        val liveSession = snapshot.activeSession ?: if (isRecording) {
+            com.example.guardianangel.domain.model.RecordingSession(
+                id = "live-session",
+                startedAtEpochMillis = System.currentTimeMillis(),
+                triggeredBy = null,
+                transcriptPreview = emptyList(),
+            )
+        } else null
+
+        AnimatedVisibility(
+            visible = isRecording && liveSession != null,
+            enter = fadeIn() + expandVertically(),
+            exit = fadeOut() + shrinkVertically(),
+        ) {
+            liveSession?.let { session ->
+                ActiveRecordingPanel(
+                    session = session,
+                    contactsNotifiedLabel = notifiedLabel(snapshot),
+                    onStop = {
+                        onAction(HomeAction.StopRecording)
+                        onDisarm()
+                    },
+                )
+            }
+        }
+
         AngelHeroCard(
             mood = mood,
             message = angelMessage(snapshot, mood),
@@ -260,8 +330,27 @@ private fun ReadyState(
             badgeIcon = if (atHaven) GuardianIcons.Moon else GuardianIcons.Waveform,
         )
 
-        // Above the hands-free card: a gap in setup is the reason hands-free might not
-        // work, so it reads in the right order.
+        // The safety score sits directly under Angel, before anything optional.
+        //
+        // It used to live inside the sanctuary/journey bodies, below the setup and
+        // hands-free cards — which on a phone put it entirely below the fold on a
+        // not-yet-configured account. The one number the user opens the app to see
+        // required scrolling past three cards telling her what she had not set up.
+        SafetyGaugeCard(
+            score = snapshot.safetyScore,
+            title = if (atHaven) "Sanctuary zone" else "Transit safety",
+            statusChip = if (atHaven) "Shielded" else "Live",
+            body = if (atHaven) {
+                "Your score stays at 100% inside your home geofence. I'll start " +
+                    "recalibrating the moment you leave."
+            } else {
+                snapshot.safetyScore.rationale
+            },
+            footer = if (atHaven) null else journeyMetrics(snapshot),
+        )
+
+        // Below the score: a gap in setup is the reason hands-free might not work, so it
+        // reads in the right order.
         if (!setup.isComplete) {
             SetupNeededCard(setup = setup, onFix = onFixCapability)
         }
@@ -273,21 +362,6 @@ private fun ReadyState(
             onDisarm = onDisarm,
             onFixBlocker = onFixBlocker,
         )
-
-        // --- Recording takes over --------------------------------------------------
-        AnimatedVisibility(
-            visible = isRecording && snapshot.activeSession != null,
-            enter = fadeIn() + expandVertically(),
-            exit = fadeOut() + shrinkVertically(),
-        ) {
-            snapshot.activeSession?.let { session ->
-                ActiveRecordingPanel(
-                    session = session,
-                    contactsNotifiedLabel = notifiedLabel(snapshot),
-                    onStop = { onAction(HomeAction.StopRecording) },
-                )
-            }
-        }
 
         if (atHaven) {
             SanctuaryBody(snapshot, onAction, onPlanRoute, onRecordNow)
@@ -312,6 +386,64 @@ private fun ReadyState(
     }
 }
 
+@Composable
+private fun AmberAlertBanner(
+    rationale: String,
+    onDismiss: () -> Unit,
+    onEmergencyCall: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = GuardianTheme.shapes.lg
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(GuardianTheme.materialColors.errorContainer)
+            .padding(GuardianTheme.spacing.md),
+        verticalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
+        ) {
+            Icon(
+                imageVector = GuardianIcons.CrisisAlert,
+                contentDescription = null,
+                tint = GuardianTheme.materialColors.onErrorContainer,
+                modifier = Modifier.size(24.dp),
+            )
+            Text(
+                text = "CRITICAL SAFETY ESCALATION",
+                style = GuardianTheme.type.labelMd,
+                color = GuardianTheme.materialColors.onErrorContainer,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = "Dismiss",
+                style = GuardianTheme.type.labelSm,
+                color = GuardianTheme.materialColors.onErrorContainer,
+                modifier = Modifier
+                    .clip(GuardianTheme.shapes.pill)
+                    .clickable(onClick = onDismiss)
+                    .padding(horizontal = GuardianTheme.spacing.xs, vertical = 2.dp),
+            )
+        }
+        Text(
+            text = rationale,
+            style = GuardianTheme.type.bodyMd,
+            color = GuardianTheme.materialColors.onErrorContainer,
+        )
+        GuardianPrimaryButton(
+            text = "Call 911 / Alert Circle",
+            onClick = onEmergencyCall,
+            leadingIcon = GuardianIcons.Phone,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+
 /** Sanctuary: one clear way out the door, two quiet secondary actions. */
 @Composable
 private fun SanctuaryBody(
@@ -320,14 +452,6 @@ private fun SanctuaryBody(
     onPlanRoute: () -> Unit,
     onRecordNow: () -> Unit,
 ) {
-    SafetyGaugeCard(
-        score = snapshot.safetyScore,
-        title = "Sanctuary zone",
-        statusChip = "Shielded",
-        body = "Your score stays at 100% inside your home geofence. I'll start " +
-            "recalibrating the moment you leave.",
-    )
-
     GuardianPrimaryButton(
         text = "Start guarded walk",
         onClick = onPlanRoute,
@@ -355,34 +479,6 @@ private fun JourneyBody(
     isRecording: Boolean,
     onRecordNow: () -> Unit,
 ) {
-    val journey = snapshot.journey
-
-    SafetyGaugeCard(
-        score = snapshot.safetyScore,
-        title = "Transit safety",
-        statusChip = "Live",
-        body = snapshot.safetyScore.rationale,
-        footer = {
-            Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
-                MetricTile(
-                    label = "Illumination",
-                    value = "${journey?.illuminationPercent ?: 0}% lit",
-                    icon = GuardianIcons.Sun,
-                    modifier = Modifier.weight(1f),
-                )
-                MetricTile(
-                    label = "Arrival",
-                    value = journey?.delayMinutes
-                        ?.takeIf { it > 0 }
-                        ?.let { "+$it min" }
-                        ?: "On time",
-                    icon = GuardianIcons.Clock,
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        },
-    )
-
     if (!isRecording) {
         DuressTriggerCard(
             onFire = { tier -> onAction(HomeAction.DispatchAlert(tier)) },
@@ -410,6 +506,35 @@ private fun JourneyBody(
             leadingIcon = GuardianIcons.Mic,
             modifier = Modifier.fillMaxWidth(),
         )
+    }
+}
+
+/**
+ * Lighting and arrival tiles under the score, while a walk is live.
+ *
+ * Returns null at a safe haven, where neither has anything to report and two empty tiles
+ * read as missing data rather than as "nothing to worry about".
+ */
+private fun journeyMetrics(snapshot: GuardianSnapshot): (@Composable ColumnScope.() -> Unit)? {
+    val journey = snapshot.journey ?: return null
+    return {
+        Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
+            MetricTile(
+                label = "Illumination",
+                value = "${journey.illuminationPercent}% lit",
+                icon = GuardianIcons.Sun,
+                modifier = Modifier.weight(1f),
+            )
+            MetricTile(
+                label = "Arrival",
+                value = journey.delayMinutes
+                    .takeIf { it > 0 }
+                    ?.let { "+$it min" }
+                    ?: "On time",
+                icon = GuardianIcons.Clock,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

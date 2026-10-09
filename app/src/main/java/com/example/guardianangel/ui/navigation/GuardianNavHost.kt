@@ -34,6 +34,7 @@ import com.example.guardianangel.ui.map.MapRoute
 import com.example.guardianangel.ui.onboarding.CodewordSetupRoute
 import com.example.guardianangel.ui.onboarding.GuardianContactsRoute
 import com.example.guardianangel.ui.onboarding.PermissionsRoute
+import com.example.guardianangel.ui.auth.LoginRoute
 import com.example.guardianangel.ui.onboarding.SignUpRoute
 import com.example.guardianangel.ui.onboarding.VoiceCalibrationRoute
 import com.example.guardianangel.ui.onboarding.WakeWordRoute
@@ -62,7 +63,7 @@ private const val TRANSITION_MILLIS = 280
 @Composable
 fun GuardianNavHost(
     container: AppContainer,
-    startAtOnboarding: Boolean,
+    start: StartDestination,
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
 ) {
@@ -77,13 +78,14 @@ fun GuardianNavHost(
     ) {
         NavHost(
             navController = navController,
-            startDestination = if (startAtOnboarding) Routes.ONBOARDING_GRAPH else Routes.MAIN_GRAPH,
+            startDestination = start.route,
             modifier = Modifier.fillMaxSize(),
             enterTransition = { slideIn() },
             exitTransition = { slideOut() },
             popEnterTransition = { popIn() },
             popExitTransition = { popOut() },
         ) {
+            authScreens(navController, container)
             onboardingGraph(navController, container)
             mainGraph(navController, container)
             stackedGraph(navController, container)
@@ -109,24 +111,66 @@ fun GuardianNavHost(
     }
 }
 
+/**
+ * Moves into the app, discarding the auth gate.
+ *
+ * `popUpTo(0)` clears the entire back stack rather than popping to a named destination,
+ * because the gate may have been reached from either sign-up or log-in and either could
+ * be the graph's start. Leaving them on the stack would let the back button walk a
+ * signed-in user back to a login form.
+ */
+private fun NavHostController.enterApp(route: String) {
+    navigate(route) {
+        popUpTo(0) { inclusive = true }
+        launchSingleTop = true
+    }
+}
+
 // --- Graphs --------------------------------------------------------------------------
+
+/**
+ * The gate: sign up or log in.
+ *
+ * Two top-level destinations rather than a nested graph, because which one opens depends
+ * on live state — whether this device already has an account — and a nested graph fixes
+ * its start destination when the graph is built.
+ *
+ * Entering the app replaces the whole back stack, so the hardware back button cannot
+ * return to a login screen from inside. Once someone is in, the auth screens are gone.
+ */
+private fun NavGraphBuilder.authScreens(
+    navController: NavHostController,
+    container: AppContainer,
+) {
+    composable(Routes.SIGN_UP) {
+        SignUpRoute(
+            container = container,
+            onContinue = { navController.enterApp(Routes.ONBOARDING_GRAPH) },
+            onLogIn = { navController.navigate(Routes.LOG_IN) },
+        )
+    }
+    composable(Routes.LOG_IN) {
+        LoginRoute(
+            container = container,
+            // Straight to the app: a returning user has already been through setup, and
+            // anything she skipped is surfaced on Home rather than re-run here.
+            onAuthenticated = { navController.enterApp(Routes.MAIN_GRAPH) },
+            onCreateAccount = { navController.navigate(Routes.SIGN_UP) },
+        )
+    }
+}
 
 private fun NavGraphBuilder.onboardingGraph(
     navController: NavHostController,
     container: AppContainer,
 ) {
-    navigation(startDestination = Routes.SIGN_UP, route = Routes.ONBOARDING_GRAPH) {
-        composable(Routes.SIGN_UP) {
-            SignUpRoute(
-                repository = container.accountRepository,
-                onContinue = { navController.navigate(Routes.PERMISSIONS) },
-            )
-        }
+    navigation(startDestination = Routes.PERMISSIONS, route = Routes.ONBOARDING_GRAPH) {
         composable(Routes.PERMISSIONS) {
             PermissionsRoute(
                 repository = container.accountRepository,
                 listeningRepository = container.listeningRepository,
-                onBack = navController::popBackStack,
+                // No back: sign-up is behind the auth gate and must not be returned to.
+                onBack = null,
                 onContinue = { navController.navigate(Routes.VOICE_CALIBRATION) },
             )
         }
@@ -185,6 +229,7 @@ private fun NavGraphBuilder.mainGraph(
                 contactsRepository = container.contactsRepository,
                 voiceProfiles = container.voiceProfileRepository,
                 permissions = container.permissionProbe,
+                angelOrchestrator = container.angelOrchestrator,
                 onOpenSession = { navController.navigate(Routes.sessionDetail(it)) },
                 onPlanRoute = { navController.navigateToTab(Routes.MAP) },
                 onSetUpWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
@@ -197,6 +242,9 @@ private fun NavGraphBuilder.mainGraph(
             MapRoute(
                 routeRepository = container.routeRepository,
                 guardianRepository = container.guardianRepository,
+                crimeDataService = container.crimeDataService,
+                locationTracker = container.locationTracker,
+                permissionProbe = container.permissionProbe,
                 onJourneyStarted = { navController.navigateToTab(Routes.HOME) },
             )
         }
@@ -214,15 +262,16 @@ private fun NavGraphBuilder.mainGraph(
                 listeningRepository = container.listeningRepository,
                 cloudSync = container.cloudSync,
                 currentUserId = { container.currentUserId() },
+                authRepository = container.authRepository,
                 onOpenWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
                 onOpenCodewords = { navController.navigate(Routes.SETTINGS_CODEWORDS) },
                 onOpenGuardians = { navController.navigate(Routes.SETTINGS_GUARDIANS) },
                 onOpenVoice = { navController.navigate(Routes.SETTINGS_VOICE) },
-                onSignOut = {
-                    navController.navigate(Routes.ONBOARDING_GRAPH) {
-                        popUpTo(Routes.MAIN_GRAPH) { inclusive = true }
-                    }
-                },
+                // Back to the gate, not to onboarding: the account still exists and its
+                // setup is intact, so what is needed is a log-in, not a fresh wizard.
+                // Log-in rather than sign-up: the account and its setup are still
+                // there, so what is needed is a way back in.
+                onSignOut = { navController.enterApp(Routes.LOG_IN) },
             )
         }
     }

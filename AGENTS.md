@@ -238,6 +238,10 @@ is visible. Use `GuardianTabScaffold` / `GuardianStackScaffold` / `GuardianWizar
 instead of hand-rolling insets — they own window insets, max content width and the
 floating-nav clearance.
 
+Sign-up and log-in are **outside** onboarding, as top-level destinations rather than a
+nested graph: which one opens depends on live state, and a nested graph fixes its start
+destination when the graph is built.
+
 Onboarding is **5 steps** (permissions, voice, guardians, wake word, codewords) and every
 step is skippable via the scaffold's `skipLabel`/`onSkip`. Adding a step means renumbering
 every `stepLabel` and `progress`. A skipped step must resurface: `GuardianCapability` /
@@ -313,6 +317,17 @@ She is decorative by default; pass `contentDescription` only where she is the so
 of a message, which should be nowhere.
 
 ## Home screen
+
+The safety score sits directly under Angel, above everything optional. It used to live
+inside the sanctuary/journey bodies, below the setup and hands-free cards, which put it
+entirely below the fold on a not-yet-configured account — the one number the user opens
+the app to see required scrolling past three cards about what she had not set up.
+
+The app bar's left action is **record/stop**, not a quick alert. A duress shortcut there
+put "call my emergency contacts" one stray tap from the top of the screen with no hold
+and no undo; recording is the reversible action and the one wanted often. The duress
+trigger stays a three-second hold further down.
+
 
 One `GuardianMode` drives all three states: `Standby` (mic dormant, quiet surface) ·
 `Listening` (armed, warm gradient hero plus telemetry) · `Recording` (panel expands at

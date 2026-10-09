@@ -49,6 +49,16 @@ data class Codeword(
     val phrase: String,
     val notifyContactIds: List<String> = emptyList(),
     val isArmed: Boolean = true,
+    /**
+     * True once the user has chosen this phrase herself.
+     *
+     * A new account is seeded with four suggestions so no tier is ever empty, which
+     * means "a codeword exists" cannot be used to decide whether setup happened. The
+     * home screen counted the suggestions as configured and never prompted anyone to
+     * replace them — so a user could rely on "yellow submarine" without ever having
+     * been told it was her danger word.
+     */
+    val isCustomised: Boolean = false,
 )
 
 /** How reachable a guardian is right now. */

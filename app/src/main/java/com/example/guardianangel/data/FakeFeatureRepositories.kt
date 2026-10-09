@@ -80,6 +80,17 @@ class FakeAccountRepository(
         }
     }
 
+    override suspend fun updateProfile(fullName: String, phoneNumber: String) {
+        state.update { snapshot ->
+            snapshot.copy(
+                profile = snapshot.profile?.copy(
+                    fullName = fullName.ifBlank { snapshot.profile.fullName },
+                    phoneNumber = phoneNumber,
+                ) ?: UserProfile("u1", fullName, phoneNumber, isPhoneVerified = false),
+            )
+        }
+    }
+
     override suspend fun grantPermissions(location: Boolean, microphone: Boolean) {
         state.update {
             it.copy(permissions = PermissionState(location, microphone))
@@ -184,7 +195,20 @@ class FakeActivityRepository : ActivityRepository {
         state.update { list -> list.filterNot { it.id == sessionId } }
 }
 
-class FakeRouteRepository : RouteRepository {
+class FakeRouteRepository(
+    private val crimeDataService: com.example.guardianangel.data.crime.CrimeDataService = com.example.guardianangel.data.crime.CrimeDataService()
+) : RouteRepository {
+
+    private val allDestinations = listOf(
+        RouteSamples.home,
+        Destination("work", "Work office", "450 Kendall St", com.example.guardianangel.domain.model.GeoPoint(37.7749, -122.4194), walkingMinutes = 18),
+        Destination("library", "Campus Library", "Doe Memorial", com.example.guardianangel.domain.model.GeoPoint(37.7845, -122.4080), walkingMinutes = 12, isSafeHaven = true),
+        Destination("market", "Trader Joe's", "Shattuck Ave", com.example.guardianangel.domain.model.GeoPoint(37.7780, -122.4160), walkingMinutes = 9),
+        Destination("police", "Metro Police Precinct", "767 Bryant St", com.example.guardianangel.domain.model.GeoPoint(37.7765, -122.4168), walkingMinutes = 15, isSafeHaven = true),
+        Destination("hospital", "Emergency Medical Hub", "900 Hyde St", com.example.guardianangel.domain.model.GeoPoint(37.7845, -122.4140), walkingMinutes = 20, isSafeHaven = true),
+        Destination("ferry", "Ferry Building Plaza", "1 Ferry Plaza", com.example.guardianangel.domain.model.GeoPoint(37.7955, -122.3937), walkingMinutes = 25),
+        Destination("civic", "Civic Center Station", "Market & 8th St", com.example.guardianangel.domain.model.GeoPoint(37.7797, -122.4141), walkingMinutes = 10, isSafeHaven = true),
+    )
 
     private val state = MutableStateFlow(
         RoutePlan(
@@ -200,13 +224,21 @@ class FakeRouteRepository : RouteRepository {
     override fun observeRoutePlan(): Flow<RoutePlan> = state.asStateFlow()
 
     override fun observeQuickDestinations(): Flow<List<Destination>> =
-        MutableStateFlow(RouteSamples.quickDestinations).asStateFlow()
+        MutableStateFlow(allDestinations.drop(1)).asStateFlow()
 
     override suspend fun selectDestination(destinationId: String) {
-        val destination = RouteSamples.quickDestinations.firstOrNull { it.id == destinationId }
-            ?: return
+        val destination = allDestinations.firstOrNull { it.id == destinationId } ?: return
+        selectCustomDestination(destination)
+    }
+
+    override suspend fun selectCustomDestination(destination: Destination) {
+        val currentOrigin = state.value.origin
+        val computedRoutes = crimeDataService.planSafeRoutes(currentOrigin.point, destination.point)
         state.update {
-            it.copy(destination = destination, routes = RouteSamples.routesTo(destination))
+            it.copy(
+                destination = destination,
+                routes = computedRoutes,
+            )
         }
     }
 

@@ -23,14 +23,42 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface UserDao {
-    @Query("SELECT * FROM users LIMIT 1")
+    /**
+     * The signed-in user, or null when nobody is.
+     *
+     * Filtered on `sessionActive` so signing out hides the account without deleting it.
+     * Everything else in the database hangs off this row by a cascading foreign key, so
+     * deleting it to end a session would wipe the user's guardians and codewords.
+     */
+    @Query("SELECT * FROM users WHERE sessionActive = 1 LIMIT 1")
     fun observeCurrent(): Flow<UserEntity?>
+
+    /** Any account on this device, signed in or not. Used by the login screen. */
+    @Query("SELECT * FROM users LIMIT 1")
+    suspend fun findAnyAccount(): UserEntity?
+
+    @Query("SELECT * FROM users WHERE LOWER(email) = LOWER(:email) LIMIT 1")
+    suspend fun findByEmail(email: String): UserEntity?
+
+    @Query("SELECT COUNT(*) FROM users")
+    suspend fun accountCount(): Int
+
+    /**
+     * Live count, so the auth gate switches between sign-up and log-in as accounts come
+     * and go. A one-shot read went stale the moment someone signed up, and a later
+     * sign-out then showed them a sign-up form again.
+     */
+    @Query("SELECT COUNT(*) FROM users")
+    fun observeAccountCount(): Flow<Int>
+
+    @Query("UPDATE users SET sessionActive = :active, updatedAt = :now WHERE id = :id")
+    suspend fun setSessionActive(id: String, active: Boolean, now: Long)
 
     @Query("SELECT * FROM users WHERE id = :id")
     suspend fun find(id: String): UserEntity?
 
-    /** One-shot read of the current user, for code that cannot collect a Flow. */
-    @Query("SELECT * FROM users LIMIT 1")
+    /** One-shot read of the signed-in user, for code that cannot collect a Flow. */
+    @Query("SELECT * FROM users WHERE sessionActive = 1 LIMIT 1")
     suspend fun observeCurrentOnce(): UserEntity?
 
     @Upsert
@@ -107,6 +135,10 @@ interface WakeWordDao {
 interface CodewordDao {
     @Query("SELECT * FROM codewords WHERE userId = :userId ORDER BY tier")
     fun observeAll(userId: String): Flow<List<CodewordEntity>>
+
+    /** Find by tier, so a save updates the seeded row instead of inserting beside it. */
+    @Query("SELECT * FROM codewords WHERE userId = :userId AND tier = :tier LIMIT 1")
+    suspend fun findByTier(userId: String, tier: String): CodewordEntity?
 
     @Upsert
     suspend fun upsert(codeword: CodewordEntity)

@@ -42,4 +42,10 @@ interface GuardianRepository {
 
     /** Re-evaluate the safety score for the current position. */
     suspend fun rescanArea()
+
+    /** Appends an attributed transcript line to the live recording session. */
+    suspend fun updateTranscript(line: com.example.guardianangel.domain.model.TranscriptLine) = Unit
+
+    /** Updates the live multi-factor safety score. */
+    suspend fun updateSafetyScore(score: com.example.guardianangel.domain.model.SafetyScore) = Unit
 }

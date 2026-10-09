@@ -92,8 +92,11 @@ fun CodewordSetupRoute(
         onComplete = { phrases ->
             scope.launch {
                 phrases.forEach { (tier, phrase) ->
+                    // The id is ignored by the repository, which looks the row up by
+                    // tier — this screen used to invent one and insert a duplicate
+                    // alongside the seeded suggestion.
                     codewordRepository.updateCodeword(
-                        Codeword(id = "cw-${tier.name.lowercase()}", tier = tier, phrase = phrase)
+                        Codeword(id = "", tier = tier, phrase = phrase)
                     )
                 }
                 accountRepository.completeOnboarding()

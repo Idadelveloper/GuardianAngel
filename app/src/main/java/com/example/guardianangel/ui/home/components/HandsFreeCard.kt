@@ -186,6 +186,8 @@ private fun BlockerRow(
             "Microphone access is off" to "Allow"
         ListeningRequirement.NotificationPermission ->
             "Notifications are off — Android needs one to listen" to "Allow"
+        ListeningRequirement.LocationPermission ->
+            "Location is off — I couldn't tell anyone where you are" to "Allow"
         ListeningRequirement.WakeWordEnrolled ->
             "No wake word set yet" to "Choose one"
         ListeningRequirement.BatteryExemption ->

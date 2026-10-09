@@ -80,6 +80,7 @@
     <string name="recording_location_shared">Live location is being shared</string>
     <string name="recording_transcript">Live transcript</string>
     <string name="action_stop_recording">Stop recording</string>
+    <string name="action_start_recording">Start recording</string>
     <string name="recording_mistake_hint">Triggered by mistake? Stopping now cancels the alert and discards nothing already sent.</string>
 
     <!-- Codewords -->

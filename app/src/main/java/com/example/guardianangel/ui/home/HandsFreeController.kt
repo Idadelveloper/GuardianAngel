@@ -54,7 +54,7 @@ class HandsFreeController(
      * silently never fires.
      */
     fun checkDetector() {
-        scope.launch {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val detector = SherpaWakeWordDetector(context)
             val ready = detector.load()
             repository.setDetectorReady(ready)
@@ -77,19 +77,19 @@ class HandsFreeController(
      * after a dialog or a trip to settings. The repository does the reading itself.
      */
     fun syncPermissions() {
-        scope.launch { repository.refreshPermissions() }
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) { repository.refreshPermissions() }
     }
 
     /** Arms listening. Only valid while an activity is visible. */
     fun arm() {
-        scope.launch {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             GuardianListeningService.start(context)
             repository.arm()
         }
     }
 
     fun disarm() {
-        scope.launch {
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             GuardianListeningService.stop(context)
             repository.disarm()
         }
@@ -98,20 +98,42 @@ class HandsFreeController(
     /**
      * Starts recording from a tap, arming first if Angel is not already listening.
      *
-     * Kept separate from [arm] because it has a weaker precondition on purpose: it needs
-     * the microphone and nothing else. No wake word, no keyword model, no notification
-     * permission. This is the path that still works when everything clever has failed,
-     * so the only thing allowed to block it is the microphone itself.
+     * Kept separate from [arm] because its preconditions are deliberately narrower: it
+     * needs the microphone and location, and nothing else. No wake word, no keyword
+     * model, no notification permission. This is the path that still works when
+     * everything clever has failed.
      *
-     * @return false when the microphone is missing, after asking for it.
+     * Location is required rather than optional because a recording nobody can be sent
+     * to is half a feature — the guardians get an alert and no idea where to go. Asking
+     * at the moment of use is also the only honest time to ask: this is when it matters.
+     *
+     * @return what happened, so the caller only shows recording UI if recording started.
      */
-    fun recordNow(): Boolean {
+    fun recordNow(): RecordAttempt {
         if (!context.hasPermission(Manifest.permission.RECORD_AUDIO)) {
             requestMicrophone()
-            return false
+            return RecordAttempt.NeedsMicrophone
+        }
+        // Returns here rather than falling through. An intermediate version asked for
+        // location and then started recording anyway, so a tap both raised a permission
+        // dialog and began capturing behind it — which is the one combination that makes
+        // the dialog a lie.
+        if (!context.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
+            !context.hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION)
+        ) {
+            requestLocationPermission()
+            return RecordAttempt.NeedsLocation
         }
         GuardianListeningService.record(context)
-        return true
+        return RecordAttempt.Started
+    }
+
+    /** Stops a recording that is under way, standing the service down. */
+    fun stopRecording() {
+        scope.launch {
+            GuardianListeningService.stop(context)
+            repository.disarm()
+        }
     }
 
     /** Asks for location, which the setup card offers when it is missing. */
@@ -122,11 +144,23 @@ class HandsFreeController(
         when (requirement) {
             ListeningRequirement.MicrophonePermission -> requestMicrophone()
             ListeningRequirement.NotificationPermission -> requestNotifications()
+            ListeningRequirement.LocationPermission -> requestLocationPermission()
             ListeningRequirement.BatteryExemption -> context.openBatterySettings()
             // App state, not system state — the caller navigates instead.
             ListeningRequirement.WakeWordEnrolled -> Unit
         }
     }
+}
+
+/** The outcome of asking to record. */
+enum class RecordAttempt {
+    Started,
+
+    /** Permission dialog shown. The UI must not claim to be recording. */
+    NeedsMicrophone,
+    NeedsLocation;
+
+    val isStarted: Boolean get() = this == Started
 }
 
 /**

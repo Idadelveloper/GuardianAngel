@@ -28,6 +28,15 @@ interface AccountRepository {
     fun observeAccount(): Flow<AccountSnapshot>
 
     suspend fun createAccount(fullName: String, phoneNumber: String, password: String)
+
+    /**
+     * Updates the profile the settings and home screens read.
+     *
+     * Separate from [createAccount] because that one also advances the wizard. There was
+     * previously no way to change a name after sign-up, so a typo in the one string shown
+     * on every screen was permanent.
+     */
+    suspend fun updateProfile(fullName: String, phoneNumber: String)
     suspend fun grantPermissions(location: Boolean, microphone: Boolean)
     suspend fun saveVoiceProfile(clarityPercent: Int)
     suspend fun setSensitivity(sensitivity: ListeningSensitivity)
@@ -78,4 +87,5 @@ interface RouteRepository {
     suspend fun selectDestination(destinationId: String)
     suspend fun clearDestination()
     suspend fun setPreference(preference: RoutePreference)
+    suspend fun selectCustomDestination(destination: Destination) = Unit
 }

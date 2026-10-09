@@ -1,0 +1,30 @@
+[debug] [2026-10-09T21:44:11.921Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-09T21:44:11.923Z] > authorizing via signed-in user (idadelm@gmail.com)
+[debug] [2026-10-09T21:44:11.931Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-09T21:44:11.931Z] > authorizing via signed-in user (idadelm@gmail.com)
+[debug] [2026-10-09T21:44:11.942Z] Checked if tokens are valid: false, expires at: 1791518125189
+[debug] [2026-10-09T21:44:11.942Z] Checked if tokens are valid: false, expires at: 1791518125189
+[debug] [2026-10-09T21:44:11.943Z] > refreshing access token with scopes: []
+[debug] [2026-10-09T21:44:11.943Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-10-09T21:44:11.943Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-09T21:44:11.958Z] Checked if tokens are valid: false, expires at: 1791518125189
+[debug] [2026-10-09T21:44:11.958Z] Checked if tokens are valid: false, expires at: 1791518125189
+[debug] [2026-10-09T21:44:11.958Z] > refreshing access token with scopes: []
+[debug] [2026-10-09T21:44:11.958Z] >>> [apiv2][query] POST https://www.googleapis.com/oauth2/v3/token [none]
+[debug] [2026-10-09T21:44:11.958Z] >>> [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-09T21:44:12.074Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-10-09T21:44:12.074Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-09T21:44:12.104Z] >>> [apiv2][query] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com [none]
+[debug] [2026-10-09T21:44:12.104Z] >>> [apiv2][(partial)header] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com  x-goog-user-project=
+[debug] [2026-10-09T21:44:12.105Z] <<< [apiv2][status] POST https://www.googleapis.com/oauth2/v3/token 200
+[debug] [2026-10-09T21:44:12.105Z] <<< [apiv2][body] POST https://www.googleapis.com/oauth2/v3/token [omitted]
+[debug] [2026-10-09T21:44:12.124Z] >>> [apiv2][query] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com [none]
+[debug] [2026-10-09T21:44:12.124Z] >>> [apiv2][(partial)header] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com  x-goog-user-project=
+[debug] [2026-10-09T21:44:12.393Z] <<< [apiv2][status] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com 400
+[debug] [2026-10-09T21:44:12.393Z] <<< [apiv2][body] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com [omitted]
+[debug] [2026-10-09T21:44:12.428Z] <<< [apiv2][status] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com 400
+[debug] [2026-10-09T21:44:12.428Z] <<< [apiv2][body] GET https://serviceusage.googleapis.com/v1/projects//services/firebaseappdistribution.googleapis.com [omitted]
+[debug] [2026-10-09T21:44:12.431Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-09T21:44:12.431Z] > authorizing via signed-in user (idadelm@gmail.com)
+[debug] [2026-10-09T21:44:12.432Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-10-09T21:44:12.433Z] > authorizing via signed-in user (idadelm@gmail.com)

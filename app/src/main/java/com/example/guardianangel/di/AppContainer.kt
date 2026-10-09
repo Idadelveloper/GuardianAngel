@@ -11,6 +11,7 @@ import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.data.sync.CloudSync
 import com.example.guardianangel.domain.repository.AuthRepository
+import com.example.guardianangel.domain.repository.AuthUser
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.GuardianRepository
@@ -55,8 +56,29 @@ interface AppContainer {
     /** Optional cloud backup. Reports Unavailable when no Firebase project is set up. */
     val cloudSync: CloudSync
 
+    val crimeDataService: com.example.guardianangel.data.crime.CrimeDataService
+    val locationTracker: com.example.guardianangel.data.platform.LocationTracker?
+    val angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator
+
     /** The signed-in user's id, for anything scoped to them. */
     suspend fun currentUserId(): String
+
+    /**
+     * Prepares local storage for a freshly authenticated account.
+     *
+     * Called by the auth screens after a successful sign-up or sign-in. Before the login
+     * gate existed, this work happened during a silent anonymous bootstrap; now an
+     * account can first appear from the UI, so the UI has to say when.
+     */
+    suspend fun onAuthenticated(user: AuthUser)
+
+    /**
+     * Whether this device holds an account at all, signed in or not.
+     *
+     * Decides whether the auth gate opens on log-in or sign-up. Distinct from the auth
+     * state, which only says whether a session is *open*.
+     */
+    fun observeHasAccount(): kotlinx.coroutines.flow.Flow<Boolean>
 }
 
 /**
@@ -83,6 +105,13 @@ class InMemoryAppContainer(
     override val permissionProbe: PermissionProbe =
         com.example.guardianangel.data.GrantedPermissions()
 
+    override val crimeDataService = com.example.guardianangel.data.crime.CrimeDataService()
+    override val locationTracker: com.example.guardianangel.data.platform.LocationTracker? = null
+    override val angelOrchestrator = com.example.guardianangel.agent.AngelAgentOrchestrator(
+        crimeDataService,
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+    )
+
     // Previews never touch the network or a database.
     override val cloudSync = CloudSync(
         database = throw UnsupportedOperationException("previews do not sync"),
@@ -90,4 +119,8 @@ class InMemoryAppContainer(
     )
 
     override suspend fun currentUserId(): String = "preview-user"
+
+    override suspend fun onAuthenticated(user: AuthUser) = Unit
+
+    override fun observeHasAccount() = kotlinx.coroutines.flow.flowOf(true)
 }

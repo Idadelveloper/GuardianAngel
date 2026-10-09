@@ -22,7 +22,8 @@ class GuardianSetupTest {
             hasWakeWord = false,
             voiceprintUsable = false,
             hasLocationPermission = false,
-            codewordCount = 0,
+            hasMicrophonePermission = false,
+            customisedCodewordCount = 0,
             guardianCount = 0,
         )
         assertTrue(setup.ready.isEmpty())
@@ -36,7 +37,8 @@ class GuardianSetupTest {
             hasWakeWord = true,
             voiceprintUsable = true,
             hasLocationPermission = true,
-            codewordCount = 4,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 4,
             guardianCount = 1,
         )
         assertTrue("Still reporting ${setup.missing}", setup.isComplete)
@@ -52,7 +54,8 @@ class GuardianSetupTest {
             hasWakeWord = false,
             voiceprintUsable = true,
             hasLocationPermission = true,
-            codewordCount = 4,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 4,
             guardianCount = 1,
         )
         assertFalse(GuardianCapability.VoiceMatch in setup.ready)
@@ -67,7 +70,8 @@ class GuardianSetupTest {
             hasWakeWord = true,
             voiceprintUsable = false,
             hasLocationPermission = true,
-            codewordCount = 4,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 4,
             guardianCount = 1,
         )
         assertTrue(GuardianCapability.HandsFree in setup.ready)
@@ -75,16 +79,73 @@ class GuardianSetupTest {
     }
 
     @Test
-    fun `having nobody to alert is raised before anything else`() {
+    fun `seeded codeword suggestions do not count as setup`() {
+        // A new account is seeded with four suggestions so no tier is empty. Counting
+        // rows reported them as configured, so the prompt to choose her own phrases
+        // never appeared and she could end up relying on "yellow submarine".
+        val setup = guardianSetup(
+            hasWakeWord = true,
+            voiceprintUsable = true,
+            hasLocationPermission = true,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 0,
+            guardianCount = 1,
+        )
+        assertFalse(GuardianCapability.CodewordActions in setup.ready)
+        assertTrue(GuardianCapability.CodewordActions in setup.missing)
+    }
+
+    @Test
+    fun `hands-free needs the microphone, not just a phrase`() {
+        // A wake word with no microphone is a phrase nothing is listening for. Reporting
+        // hands-free as ready there would be the app claiming a protection it has not got.
+        val setup = guardianSetup(
+            hasWakeWord = true,
+            voiceprintUsable = true,
+            hasLocationPermission = true,
+            hasMicrophonePermission = false,
+            customisedCodewordCount = 4,
+            guardianCount = 1,
+        )
+        assertFalse(GuardianCapability.HandsFree in setup.ready)
+        assertFalse(GuardianCapability.MicrophoneAccess in setup.ready)
+        assertEquals(
+            "The microphone is the most consequential thing to be missing",
+            GuardianCapability.MicrophoneAccess,
+            setup.mostImportantMissing,
+        )
+    }
+
+    @Test
+    fun `the microphone is raised before anything else`() {
         val setup = guardianSetup(
             hasWakeWord = false,
             voiceprintUsable = false,
             hasLocationPermission = false,
-            codewordCount = 0,
+            hasMicrophonePermission = false,
+            customisedCodewordCount = 0,
+            guardianCount = 0,
+        )
+        // Nothing else in the list does anything without it, so asking for a guardian
+        // first would be asking her to set up a feature that cannot run.
+        assertEquals(
+            GuardianCapability.MicrophoneAccess,
+            setup.mostImportantMissing,
+        )
+    }
+
+    @Test
+    fun `having nobody to alert is raised once the microphone is granted`() {
+        val setup = guardianSetup(
+            hasWakeWord = false,
+            voiceprintUsable = false,
+            hasLocationPermission = false,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 0,
             guardianCount = 0,
         )
         assertEquals(
-            "With everything missing, the gap that matters most is having no guardian",
+            "An alert with nobody to send it to is the next worst gap",
             GuardianCapability.GuardianAlerts,
             setup.mostImportantMissing,
         )
@@ -98,7 +159,8 @@ class GuardianSetupTest {
             hasWakeWord = true,
             voiceprintUsable = false,
             hasLocationPermission = false,
-            codewordCount = 4,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 4,
             guardianCount = 1,
         )
         assertEquals(
@@ -113,7 +175,8 @@ class GuardianSetupTest {
             hasWakeWord = true,
             voiceprintUsable = true,
             hasLocationPermission = true,
-            codewordCount = 1,
+            hasMicrophonePermission = true,
+            customisedCodewordCount = 1,
             guardianCount = 1,
         )
         assertTrue(GuardianCapability.CodewordActions in setup.ready)

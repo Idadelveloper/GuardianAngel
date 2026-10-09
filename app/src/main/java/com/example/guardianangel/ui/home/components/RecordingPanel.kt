@@ -158,15 +158,15 @@ fun ActiveRecordingPanel(
             )
         }
 
+        Spacer(Modifier.height(GuardianTheme.spacing.md))
+        Text(
+            text = stringResource(R.string.recording_transcript),
+            style = GuardianTheme.type.labelMd,
+            color = onContainer,
+        )
+        Spacer(Modifier.height(GuardianTheme.spacing.xs))
         if (session.transcriptPreview.isNotEmpty()) {
-            Spacer(Modifier.height(GuardianTheme.spacing.md))
-            Text(
-                text = stringResource(R.string.recording_transcript),
-                style = GuardianTheme.type.labelMd,
-                color = onContainer,
-            )
-            Spacer(Modifier.height(GuardianTheme.spacing.xs))
-            session.transcriptPreview.takeLast(3).forEach { line ->
+            session.transcriptPreview.takeLast(4).forEach { line ->
                 Row(
                     modifier = Modifier.padding(vertical = 3.dp),
                     horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
@@ -174,7 +174,7 @@ fun ActiveRecordingPanel(
                     Text(
                         text = line.speakerLabel,
                         style = GuardianTheme.type.labelSm,
-                        color = onContainer.copy(alpha = 0.7f),
+                        color = onContainer.copy(alpha = 0.85f),
                     )
                     Text(
                         text = line.text,
@@ -188,6 +188,12 @@ fun ActiveRecordingPanel(
                     )
                 }
             }
+        } else {
+            Text(
+                text = "Angel is actively listening and logging surroundings in real-time…",
+                style = GuardianTheme.type.bodySm,
+                color = onContainer.copy(alpha = 0.75f),
+            )
         }
 
         Spacer(Modifier.height(GuardianTheme.spacing.md))

@@ -126,6 +126,13 @@ a permission granted during onboarding is never asked for again on Home, and one
 in system settings shows up immediately. Caching it was a real bug: every fresh process
 started by assuming nothing was granted.
 
+Nothing that is already done is asked for again. The permissions step reports what the
+system actually grants and turns its button into *Continue* once everything is there, and
+a wake word or codeword that has been saved stops being prompted for. Seeded codeword
+suggestions do **not** count as configured — a brand-new account has four of them, and
+counting rows meant the app reported setup as finished before the user had chosen
+anything.
+
 A **Not set up yet** card sits above the hands-free card whenever a capability is
 missing. Onboarding steps are all skippable, which makes this necessary rather than
 decorative — a skipped step otherwise leaves the app silently unable to do part of its
@@ -206,7 +213,15 @@ Two faces of one screen, chosen by whether a guarded walk is under way:
 | **Sanctuary** | At a safe haven. Angel rests, the gauge is pinned at 100%, and the only prominent action is starting a walk. |
 | **Out & about** | A journey is live. Angel turns watchful, the gauge goes live with lighting and arrival tiles, and the duress trigger and check-in take over. |
 
-Recording cuts across both: when a trigger fires, a recording panel expands above
+The safety score sits directly under Angel, above everything else, because it is the one
+number you open the app to check. The app bar's left action is **record/stop** — one tap
+starts a real recording, another stops it.
+
+Recording needs the microphone **and** location. An alert that cannot say where you are
+leaves your guardians with an emergency and no address, so the record button asks for
+whichever is missing and starts nothing until it has both.
+
+Recording cuts across both states: when a trigger fires, a recording panel expands above
 everything with an elapsed timer, live waveform, running transcript, exactly who has been
 alerted, and a full-width **Stop recording** button.
 
@@ -222,10 +237,14 @@ both corridors — the safe route as a solid glowing line, the unlit shortcut da
 warning marker — and opens a sheet comparing them. **Walk with Angel** arms the guardian
 and hands off to Home's journey state.
 
-> The map itself is `RouteCanvas`, a stylised Compose canvas. There is no Maps SDK key in
-> this project yet, and shipping a half-wired map view would be worse than an honest
-> abstraction. Routes arrive as normalised 0..1 points, so swapping in a real map means
-> replacing one composable.
+If location is off, a banner at the top offers to turn it on — the map is the screen where
+its absence is most obvious, so it is where the offer belongs.
+
+> **The Maps API key is a placeholder.** `maps-compose` is wired in and the map composes,
+> but `com.google.android.geo.API_KEY` in `AndroidManifest.xml` is still
+> `AIzaSyPlaceholderGuardianAngelKey`, so no tiles will load until a real key is dropped
+> in. `RouteCanvas`, the stylised canvas the map replaced, is still used for the route
+> preview on a session's detail screen.
 
 ### Activity
 
@@ -239,14 +258,36 @@ which tab holds which half of the same subject.
 
 ### Settings
 
-Profile, a word from Angel, then the safeguard list. Each row reports live state in its
+Tap your name to edit it and your number. Then a word from Angel, then the safeguard
+list. Each row reports live state in its
 subtitle, so the whole setup is auditable without opening anything. Four sub-screens
 manage the wake word, codewords, guardians and voice calibration.
 
+### Sign up & log in
+
+The app opens on an auth gate. Both screens exist, and which one you see depends on
+whether this device already has an account — a returning user sent to a sign-up form
+either makes a second account or concludes her data is gone.
+
+Once you are in, the auth screens are gone: entering the app clears the whole back stack,
+and a relaunch resumes the session rather than asking again. Logging out ends the session
+without deleting anything, so logging back in returns your guardians, codewords and wake
+word intact.
+
+Login works with no Firebase project configured. The password is salted, hashed and
+Keystore-encrypted on the device, and a wrong password and an unknown address give the
+same message — distinguishing them would confirm whether an address has an account on
+this phone.
+
+**Set up without an account** is still offered, one tap below. A woman downloading this
+at 11pm should be able to arm a panic button before she is asked for an email address;
+credentials can be added later from Settings and are linked onto the same account, so
+nothing set up first is lost.
+
 ### Onboarding
 
-Sign up → permissions → voice → guardians → **wake word** → codewords. Each step is a
-wizard page with a pinned call to action and Angel explaining what she needs and why.
+Permissions → voice → guardians → **wake word** → codewords. Each step is a wizard page
+with a pinned call to action and Angel explaining what she needs and why.
 
 **Every step is skippable**, and the skip link says what skipping costs rather than a
 neutral "later" — "Skip — no hands-free for now" instead of "Skip". Whatever is skipped
@@ -518,6 +559,12 @@ many thin pointers.
 - [x] Onboarding — account, permissions, voice, guardians, wake word, codewords
 - [x] Skippable onboarding, with a **Not set up yet** card on Home that resurfaces
       whatever was skipped and names what it costs
+- [x] Auth gate — sign up and log in, both screens, with the gate gone once passed and
+      sign-out that ends the session without deleting the account
+- [x] Local credentials so login works with no Firebase project configured
+- [x] Editable profile, and settings screens that persist what they show
+- [x] Record/stop toggle in the app bar, gated on microphone and location
+- [x] Safety score above the fold, never behind the setup cards
 - [ ] **Localise the new screens.** The theme, navigation and original Home copy live in
       `strings.xml` (102 strings); copy added with the Angel screens is still inline in
       the composables and needs a pass before any non-English build.
@@ -563,7 +610,8 @@ many thin pointers.
 
 ### Still to come
 
-- [ ] Real Maps SDK behind `RouteCanvas`, plus live location
+- [x] Google Maps and a real device location source behind the Map tab
+- [ ] **A real Maps API key.** The manifest ships a placeholder, so tiles do not load yet.
 - [ ] Real safety-score model over public crime data
 - [ ] Wearable companion
 

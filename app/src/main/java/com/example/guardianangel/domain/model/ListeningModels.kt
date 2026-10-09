@@ -94,6 +94,16 @@ enum class ListeningRequirement {
     /** `POST_NOTIFICATIONS` — Android 13+ needs it to show the listening notification. */
     NotificationPermission,
 
+    /**
+     * Fine location.
+     *
+     * Blocking, by product decision: an alert that cannot say where she is leaves her
+     * guardians with an emergency and no address. Angel can technically capture audio
+     * without it, but a recording nobody can be sent to is half a feature, so recording
+     * is gated on location the same way it is gated on the microphone.
+     */
+    LocationPermission,
+
     /** No wake phrase has been set yet. */
     WakeWordEnrolled,
 

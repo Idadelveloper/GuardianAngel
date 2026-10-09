@@ -34,6 +34,8 @@ class PreviewAuthRepository(signedIn: Boolean = true) : AuthRepository {
         return AuthResult.Success(sample)
     }
 
+    override suspend fun signInAnonymously() = ensureSignedIn()
+
     override suspend fun signUpWithEmail(name: String, email: String, password: String) =
         ensureSignedIn()
 

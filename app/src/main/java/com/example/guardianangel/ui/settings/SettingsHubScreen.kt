@@ -3,6 +3,7 @@ package com.example.guardianangel.ui.settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,7 +18,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -26,6 +30,8 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.guardianangel.data.FakeAccountRepository
 import com.example.guardianangel.data.GuardianSamples
@@ -35,7 +41,12 @@ import com.example.guardianangel.domain.model.EmergencyContact
 import com.example.guardianangel.domain.model.initialsOf
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.AccountRepository
+import com.example.guardianangel.domain.repository.AuthRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
+import com.example.guardianangel.ui.components.GuardianCard
+import com.example.guardianangel.ui.components.GuardianOutlinedButton
+import com.example.guardianangel.ui.components.GuardianPrimaryButton
+import com.example.guardianangel.ui.components.GuardianTextField
 import com.example.guardianangel.data.sync.CloudSync
 import com.example.guardianangel.data.sync.SyncStatus
 import com.example.guardianangel.domain.repository.ContactsRepository
@@ -66,6 +77,7 @@ fun SettingsHubRoute(
     listeningRepository: ListeningRepository,
     cloudSync: CloudSync,
     currentUserId: suspend () -> String,
+    authRepository: AuthRepository,
     onOpenWakeWord: () -> Unit,
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
@@ -96,8 +108,16 @@ fun SettingsHubRoute(
         onOpenCodewords = onOpenCodewords,
         onOpenGuardians = onOpenGuardians,
         onOpenVoice = onOpenVoice,
+        onSaveProfile = { name, phone ->
+            scope.launch { accountRepository.updateProfile(name, phone) }
+        },
         onSignOut = {
             scope.launch {
+                // Both: the auth repository ends the session, the account repository
+                // gets its chance to clear anything session-scoped. The auth call is the
+                // one that matters and was missing — sign-out navigated away while
+                // leaving the session open, so the next launch walked straight back in.
+                authRepository.signOut()
                 accountRepository.signOut()
                 onSignOut()
             }
@@ -120,6 +140,7 @@ fun SettingsHubScreen(
     onOpenVoice: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
+    onSaveProfile: (name: String, phone: String) -> Unit = { _, _ -> },
 ) {
     // Says what will actually happen, including that it cannot happen yet.
     val cloudSubtitle = when (val status = syncStatus) {
@@ -155,32 +176,54 @@ fun SettingsHubScreen(
         },
     ) {
         account?.profile?.let { profile ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(GuardianTheme.shapes.xl)
-                    .background(GuardianTheme.colors.accentSoft.copy(alpha = 0.3f))
-                    .padding(GuardianTheme.spacing.lg),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                InitialsAvatar(initials = initialsOf(profile.fullName), size = 56.dp)
-                Spacer(Modifier.size(GuardianTheme.spacing.md))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = profile.fullName.ifBlank { "Your account" },
-                        style = GuardianTheme.type.headlineMd,
-                        color = GuardianTheme.materialColors.onSurface,
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = profile.phoneNumber.ifBlank { "No number added yet" },
-                        style = GuardianTheme.type.bodySm,
-                        color = GuardianTheme.materialColors.onSurfaceVariant,
-                    )
-                    Spacer(Modifier.height(GuardianTheme.spacing.xs))
-                    TonalPill(
-                        text = if (profile.shieldActive) "Shield active" else "Shield off",
-                        icon = GuardianIcons.ShieldCheck,
+            var editing by remember(profile.id) { mutableStateOf(false) }
+
+            if (editing) {
+                ProfileEditor(
+                    initialName = profile.fullName,
+                    initialPhone = profile.phoneNumber,
+                    onCancel = { editing = false },
+                    onSave = { name, phone ->
+                        onSaveProfile(name, phone)
+                        editing = false
+                    },
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(GuardianTheme.shapes.xl)
+                        .background(GuardianTheme.colors.accentSoft.copy(alpha = 0.3f))
+                        // The whole card opens the editor. A name shown on every screen
+                        // had no way to be corrected after sign-up.
+                        .clickable(role = Role.Button) { editing = true }
+                        .padding(GuardianTheme.spacing.lg),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    InitialsAvatar(initials = initialsOf(profile.fullName), size = 56.dp)
+                    Spacer(Modifier.size(GuardianTheme.spacing.md))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = profile.fullName.ifBlank { "Your account" },
+                            style = GuardianTheme.type.headlineMd,
+                            color = GuardianTheme.materialColors.onSurface,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = profile.phoneNumber.ifBlank { "No number added yet" },
+                            style = GuardianTheme.type.bodySm,
+                            color = GuardianTheme.materialColors.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.height(GuardianTheme.spacing.xs))
+                        TonalPill(
+                            text = if (profile.shieldActive) "Shield active" else "Shield off",
+                            icon = GuardianIcons.ShieldCheck,
+                        )
+                    }
+                    Icon(
+                        imageVector = GuardianIcons.ChevronRight,
+                        contentDescription = "Edit your details",
+                        tint = GuardianTheme.materialColors.onSurfaceVariant,
                     )
                 }
             }
@@ -353,6 +396,66 @@ fun SettingsRow(
             tint = GuardianTheme.colors.iconMuted,
             modifier = Modifier.size(18.dp),
         )
+    }
+}
+
+/**
+ * Inline editor for the name and number.
+ *
+ * Inline rather than a sub-screen: it is two fields, and pushing a destination for them
+ * would make correcting a typo feel like a bigger commitment than it is.
+ */
+@Composable
+private fun ProfileEditor(
+    initialName: String,
+    initialPhone: String,
+    onCancel: () -> Unit,
+    onSave: (name: String, phone: String) -> Unit,
+) {
+    var name by remember { mutableStateOf(initialName) }
+    var phone by remember { mutableStateOf(initialPhone) }
+
+    GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
+        Text(
+            text = "Your details",
+            style = GuardianTheme.type.labelLg,
+            color = GuardianTheme.materialColors.onSurface,
+        )
+        Spacer(Modifier.height(GuardianTheme.spacing.md))
+        GuardianTextField(
+            value = name,
+            onValueChange = { name = it },
+            label = "Full name",
+            placeholder = "Ida Delphine",
+            leadingIcon = GuardianIcons.Users,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(GuardianTheme.spacing.sm))
+        GuardianTextField(
+            value = phone,
+            onValueChange = { phone = it.filter { c -> c.isDigit() || c in "+() -" } },
+            label = "Mobile number",
+            placeholder = "(555) 392-8174",
+            leadingIcon = GuardianIcons.Phone,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+            supportingText = "Shown to your guardians so they know who is calling.",
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(GuardianTheme.spacing.md))
+        Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
+            GuardianOutlinedButton(
+                text = "Cancel",
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+            )
+            GuardianPrimaryButton(
+                text = "Save",
+                onClick = { onSave(name.trim(), phone.trim()) },
+                enabled = name.isNotBlank(),
+                leadingIcon = GuardianIcons.Check,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 

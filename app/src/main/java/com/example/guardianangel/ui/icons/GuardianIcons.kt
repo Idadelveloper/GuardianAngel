@@ -629,6 +629,32 @@ object GuardianIcons {
         }
     }
 
+    /**
+     * Start recording — a filled dot, the universal record mark.
+     *
+     * Filled rather than stroked, which is the one deliberate exception to this set's
+     * 2px-stroke rule: a stroked circle reads as "off" or as a radio button, and this
+     * control has to be unmistakable at 20dp in an app bar.
+     */
+    val Record: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "Record",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            path(fill = SolidColor(Color.Black)) {
+                moveTo(12f, 5.25f)
+                curveTo(15.73f, 5.25f, 18.75f, 8.27f, 18.75f, 12f)
+                curveTo(18.75f, 15.73f, 15.73f, 18.75f, 12f, 18.75f)
+                curveTo(8.27f, 18.75f, 5.25f, 15.73f, 5.25f, 12f)
+                curveTo(5.25f, 8.27f, 8.27f, 5.25f, 12f, 5.25f)
+                close()
+            }
+        }.build()
+    }
+
     /** Stop the active recording — the "this was accidental" control. */
     val StopSquare: ImageVector by lazy {
         strokeIcon("StopSquare") {

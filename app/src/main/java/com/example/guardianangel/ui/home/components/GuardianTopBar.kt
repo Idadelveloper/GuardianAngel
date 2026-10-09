@@ -38,7 +38,8 @@ import com.example.guardianangel.ui.theme.GuardianTheme
 @Composable
 fun GuardianTopBar(
     mode: GuardianMode,
-    onQuickAlert: () -> Unit,
+    /** Starts recording, or stops it when [mode] is already `Recording`. */
+    onToggleRecording: () -> Unit,
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     unreadCount: Int = 0,
@@ -125,16 +126,42 @@ fun GuardianTopBar(
                 }
             }
 
+            // Record / stop, left of the bell.
+            //
+            // This was a quick-alert shortcut, which put "call my emergency contacts" one
+            // stray tap from the top of the screen with no hold and no undo. Recording is
+            // the reversible action and the one wanted often, so it earns the slot; the
+            // duress trigger stays where it needs deliberate intent — a three-second hold
+            // further down the screen.
+            val recording = mode == GuardianMode.Recording
             IconButton(
-                onClick = onQuickAlert,
+                onClick = onToggleRecording,
                 colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = GuardianTheme.materialColors.primaryContainer,
-                    contentColor = GuardianTheme.materialColors.onPrimaryContainer,
+                    containerColor = if (recording) {
+                        GuardianTheme.materialColors.errorContainer
+                    } else {
+                        GuardianTheme.materialColors.primaryContainer
+                    },
+                    contentColor = if (recording) {
+                        GuardianTheme.materialColors.onErrorContainer
+                    } else {
+                        GuardianTheme.materialColors.onPrimaryContainer
+                    },
                 ),
             ) {
                 Icon(
-                    imageVector = GuardianIcons.CrisisAlert,
-                    contentDescription = stringResource(R.string.action_quick_alert),
+                    imageVector = if (recording) {
+                        GuardianIcons.StopSquare
+                    } else {
+                        GuardianIcons.Record
+                    },
+                    contentDescription = stringResource(
+                        if (recording) {
+                            R.string.action_stop_recording
+                        } else {
+                            R.string.action_start_recording
+                        }
+                    ),
                     modifier = Modifier.size(20.dp),
                 )
             }

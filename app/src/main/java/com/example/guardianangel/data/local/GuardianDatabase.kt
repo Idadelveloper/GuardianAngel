@@ -35,7 +35,7 @@ import androidx.sqlite.execSQL
         SafePlaceEntity::class,
         DisarmPinEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class GuardianDatabase : RoomDatabase() {
@@ -70,10 +70,35 @@ abstract class GuardianDatabase : RoomDatabase() {
         }
 
         /**
+         * Adds the login session, the local credential, and the codeword "the user
+         * actually chose this" flag.
+         *
+         * `sessionActive` defaults to 1 so anyone already using the app stays signed in
+         * rather than being bounced to a login screen by an update.
+         * `isCustomised` defaults to 0, which is the honest answer for existing rows:
+         * they may be seeded suggestions, and treating a suggestion as configured is the
+         * bug this column exists to fix.
+         */
+        private val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+            override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE users ADD COLUMN sessionActive INTEGER NOT NULL DEFAULT 1"
+                )
+                connection.execSQL(
+                    "ALTER TABLE users ADD COLUMN encryptedPasswordHash BLOB DEFAULT NULL"
+                )
+                connection.execSQL(
+                    "ALTER TABLE codewords ADD COLUMN isCustomised INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
+
+        /**
          * All migrations, in order. Each schema change adds one here rather than
          * bumping the version and hoping.
          */
-        val MIGRATIONS: Array<androidx.room.migration.Migration> = arrayOf(MIGRATION_1_2)
+        val MIGRATIONS: Array<androidx.room.migration.Migration> =
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3)
 
         @Volatile
         private var instance: GuardianDatabase? = null

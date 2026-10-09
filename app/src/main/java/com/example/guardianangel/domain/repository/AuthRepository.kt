@@ -23,8 +23,23 @@ interface AuthRepository {
     /** True when a backend is configured. False means local-only accounts. */
     val isCloudEnabled: Boolean
 
-    /** Signs in silently. Safe to call on every launch; a no-op when already signed in. */
+    /**
+     * Resumes an existing session. Safe to call on every launch.
+     *
+     * Fails when an account exists but was signed out, so a login screen is not bypassed
+     * on the next launch. On a device with no account at all it creates an anonymous one,
+     * which is what keeps the app usable before anyone has signed up.
+     */
     suspend fun ensureSignedIn(): AuthResult
+
+    /**
+     * Opens an anonymous session deliberately — the "continue without an account" path.
+     *
+     * Kept separate from [ensureSignedIn] because this one is a choice the user made,
+     * not a silent bootstrap, and it must reopen a signed-out account rather than
+     * stranding its data behind a fresh id.
+     */
+    suspend fun signInAnonymously(): AuthResult
 
     suspend fun signUpWithEmail(name: String, email: String, password: String): AuthResult
     suspend fun signInWithEmail(email: String, password: String): AuthResult

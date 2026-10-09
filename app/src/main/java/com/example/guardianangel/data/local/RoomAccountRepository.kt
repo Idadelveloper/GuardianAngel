@@ -89,6 +89,18 @@ class RoomAccountRepository(
         advanceOnboarding(OnboardingStep.Permissions)
     }
 
+    override suspend fun updateProfile(fullName: String, phoneNumber: String) {
+        val id = currentUser.requireId()
+        val existing = userDao.find(id) ?: return
+        userDao.upsert(
+            existing.copy(
+                displayName = fullName.trim().ifBlank { existing.displayName },
+                phoneNumber = phoneNumber.trim().ifBlank { null },
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
     override suspend fun grantPermissions(location: Boolean, microphone: Boolean) {
         permissions.value = permissions.value.copy(
             locationGranted = location,

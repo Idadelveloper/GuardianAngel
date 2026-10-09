@@ -62,7 +62,7 @@ class FakeGuardianRepository : GuardianRepository {
                     id = "session-${System.currentTimeMillis()}",
                     startedAtEpochMillis = System.currentTimeMillis(),
                     triggeredBy = trigger,
-                    transcriptPreview = sampleTranscript(),
+                    transcriptPreview = emptyList(),
                     contactsNotified = when (trigger) {
                         CodewordTier.Danger, CodewordTier.Emergency ->
                             it.contacts.map(EmergencyContact::id)
@@ -84,7 +84,7 @@ class FakeGuardianRepository : GuardianRepository {
                 id = "session-${System.currentTimeMillis()}",
                 startedAtEpochMillis = System.currentTimeMillis(),
                 triggeredBy = tier,
-                transcriptPreview = sampleTranscript(),
+                transcriptPreview = emptyList(),
             )
             it.copy(
                 mode = GuardianMode.Recording,
@@ -94,6 +94,23 @@ class FakeGuardianRepository : GuardianRepository {
                     isPoliceDispatched = tier == CodewordTier.Emergency,
                 ),
             )
+        }
+    }
+
+    override suspend fun updateTranscript(line: com.example.guardianangel.domain.model.TranscriptLine) {
+        state.update { current ->
+            val session = current.activeSession ?: return@update current
+            current.copy(
+                activeSession = session.copy(
+                    transcriptPreview = (session.transcriptPreview + line).takeLast(30)
+                )
+            )
+        }
+    }
+
+    override suspend fun updateSafetyScore(score: com.example.guardianangel.domain.model.SafetyScore) {
+        state.update { current ->
+            current.copy(safetyScore = score)
         }
     }
 
@@ -109,7 +126,5 @@ class FakeGuardianRepository : GuardianRepository {
         const val RESCAN_MILLIS = 1_600L
 
         fun initialSnapshot() = GuardianSamples.snapshot(GuardianMode.Standby)
-
-        fun sampleTranscript() = GuardianSamples.transcript()
     }
 }

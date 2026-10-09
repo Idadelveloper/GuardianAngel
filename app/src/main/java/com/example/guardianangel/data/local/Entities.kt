@@ -38,13 +38,65 @@ data class UserEntity(
     val isAnonymous: Boolean,
     /** "anonymous", "password" or "phone" — mirrors Firebase's provider ids. */
     val authProvider: String,
+    /**
+     * Whether this device currently has an open session.
+     *
+     * Separate from the row existing at all, because signing out must not delete the
+     * account. Foreign keys cascade from `users`, so deleting the row to end a session
+     * would take the user's guardians, codewords and voiceprint with it — destroying
+     * someone's safety setup because they tapped "sign out" is not a trade worth making.
+     */
+    val sessionActive: Boolean = true,
+    /**
+     * Salted SHA-256 of the password, then Keystore-encrypted. Null for anonymous
+     * accounts and for accounts whose credentials live in Firebase.
+     *
+     * Stored so the login screen genuinely authenticates on a device with no Firebase
+     * project configured, which is the default state of this app. It gates access to
+     * transcripts and guardian phone numbers, so it is not a credential that protects
+     * nothing.
+     */
+    val encryptedPasswordHash: ByteArray? = null,
     val shieldActive: Boolean = true,
     /** Where the setup wizard got to, so it can resume rather than restart. */
     val onboardingStep: String = "SignUp",
     val createdAt: Long,
     val updatedAt: Long,
     val syncedAt: Long? = null,
-)
+) {
+    // Arrays compare by reference, so the generated equals would report a change on
+    // every read and the auth state flow would re-emit forever. Same reason as
+    // [VoiceProfileEntity].
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is UserEntity) return false
+        return id == other.id &&
+            displayName == other.displayName &&
+            email == other.email &&
+            phoneNumber == other.phoneNumber &&
+            isAnonymous == other.isAnonymous &&
+            authProvider == other.authProvider &&
+            sessionActive == other.sessionActive &&
+            shieldActive == other.shieldActive &&
+            onboardingStep == other.onboardingStep &&
+            createdAt == other.createdAt &&
+            updatedAt == other.updatedAt &&
+            syncedAt == other.syncedAt &&
+            encryptedPasswordHash.contentEqualsOrBothNull(other.encryptedPasswordHash)
+    }
+
+    override fun hashCode(): Int {
+        var result = id.hashCode()
+        result = 31 * result + displayName.hashCode()
+        result = 31 * result + (email?.hashCode() ?: 0)
+        result = 31 * result + authProvider.hashCode()
+        result = 31 * result + sessionActive.hashCode()
+        result = 31 * result + onboardingStep.hashCode()
+        result = 31 * result + updatedAt.hashCode()
+        result = 31 * result + (encryptedPasswordHash?.contentHashCode() ?: 0)
+        return result
+    }
+}
 
 /**
  * The enrolled voiceprint.
@@ -165,6 +217,15 @@ data class CodewordEntity(
     /** Safe, Caution, Danger or Emergency. */
     val tier: String,
     val phrase: String,
+    /**
+     * True once the user has chosen this phrase herself.
+     *
+     * A new account is seeded with four suggestions so the tiers are never empty, which
+     * means "a row exists" says nothing about whether setup happened. Without this flag
+     * the home screen counted a brand-new account's suggestions as configured codewords,
+     * so the prompt to set them never appeared.
+     */
+    val isCustomised: Boolean = false,
     /** True means every guardian; otherwise see [CodewordContactEntity]. */
     val notifyAllContacts: Boolean = true,
     val isArmed: Boolean = true,

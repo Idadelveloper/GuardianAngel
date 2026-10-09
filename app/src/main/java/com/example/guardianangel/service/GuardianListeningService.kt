@@ -96,6 +96,9 @@ class GuardianListeningService : Service() {
                     startRecordingWhenReady = true
                     startListening()
                 }
+                scope.launch {
+                    appContainer.guardianRepository.startRecording(trigger = null)
+                }
             }
 
             else -> startListening()
@@ -161,6 +164,43 @@ class GuardianListeningService : Service() {
                 )
             }
 
+            val orchestrator = container.angelOrchestrator
+            orchestrator.setHyperAware(true)
+            val codewordsRepo = container.codewordRepository
+            val locationTracker = container.locationTracker
+
+            // Stream live device location to orchestrator if permission granted
+            locationTracker?.let { tracker ->
+                scope.launch {
+                    tracker.observeLocation().collect { point ->
+                        val address = tracker.reverseGeocode(point)
+                        orchestrator.onLocationUpdate(point, address)
+                    }
+                }
+            }
+
+            // Continuously reflect multi-agent factor scores back to GuardianRepository
+            scope.launch {
+                orchestrator.state.collect { angelState ->
+                    val factors = angelState.factors
+                    val safetyScoreModel = com.example.guardianangel.domain.model.SafetyScore(
+                        score = factors.compositeSafetyScore,
+                        deltaPercent = 0,
+                        rationale = angelState.lastAssessmentSummary,
+                        factors = listOf(
+                            com.example.guardianangel.domain.model.SafetyFactor("f-crime", "US Crime Index", "${factors.crimeScore}%", if (factors.crimeScore >= 80) com.example.guardianangel.domain.model.FactorDirection.Raises else com.example.guardianangel.domain.model.FactorDirection.Lowers),
+                            com.example.guardianangel.domain.model.SafetyFactor("f-weather", "Time & Lighting", "${factors.weatherTimeScore}%", if (factors.weatherTimeScore >= 80) com.example.guardianangel.domain.model.FactorDirection.Raises else com.example.guardianangel.domain.model.FactorDirection.Lowers),
+                            com.example.guardianangel.domain.model.SafetyFactor("f-crowd", "Pedestrian / Open Venues", "${factors.crowdScore}%", if (factors.crowdScore >= 80) com.example.guardianangel.domain.model.FactorDirection.Raises else com.example.guardianangel.domain.model.FactorDirection.Lowers),
+                            com.example.guardianangel.domain.model.SafetyFactor("f-voice", "Voice & Tone Match", "${factors.voiceToneScore}%", if (factors.voiceToneScore >= 80) com.example.guardianangel.domain.model.FactorDirection.Raises else com.example.guardianangel.domain.model.FactorDirection.Lowers),
+                            com.example.guardianangel.domain.model.SafetyFactor("f-acoustic", "Acoustic Threat Tag", "${factors.acousticScore}%", if (factors.acousticScore >= 80) com.example.guardianangel.domain.model.FactorDirection.Raises else com.example.guardianangel.domain.model.FactorDirection.Lowers),
+                            com.example.guardianangel.domain.model.SafetyFactor("f-verbal", "Verbal / Codeword Risk", "${factors.verbalScore}%", if (factors.verbalScore >= 80) com.example.guardianangel.domain.model.FactorDirection.Raises else com.example.guardianangel.domain.model.FactorDirection.Lowers),
+                        ),
+                        isLiveScanning = angelState.isHyperAware,
+                    )
+                    guardian.updateSafetyScore(safetyScoreModel)
+                }
+            }
+
             val audio = GuardianAudioSession(
                 context = applicationContext,
                 scope = scope,
@@ -183,11 +223,28 @@ class GuardianListeningService : Service() {
                         guardian.dispatchAlert(CodewordTier.Danger)
                     }
                 },
+                onTranscriptDecoded = { chunk, isUser, peakDb ->
+                    scope.launch {
+                        val codewords = runCatching { codewordsRepo.observeCodewords().first() }.getOrDefault(emptyList())
+                        orchestrator.onTranscriptReceived(chunk, guardian, codewords)
+                        val line = com.example.guardianangel.domain.model.TranscriptLine(
+                            speakerLabel = if (isUser) "You" else "Unfamiliar Speaker",
+                            text = chunk.text,
+                            atEpochMillis = System.currentTimeMillis(),
+                            isFlagged = orchestrator.state.value.factors.verbalScore < 70,
+                        )
+                        guardian.updateTranscript(line)
+                    }
+                },
+                onEventsDetected = { events, peakDb ->
+                    orchestrator.onAudioEvents(events, peakDb)
+                },
             )
             session = audio
 
+            val effectivePhrase = wakeWord.phrase.ifBlank { "hey angel" }
             val ready = audio.prepare(
-                wakePhrase = wakeWord.phrase,
+                wakePhrase = effectivePhrase,
                 voiceprint = voiceprint,
                 requireVoiceMatch = gateOnVoice,
             )
@@ -234,6 +291,7 @@ class GuardianListeningService : Service() {
         val closing = session
         session = null
         _state.value = false
+        runCatching { appContainer.angelOrchestrator.setHyperAware(false) }
         // The notification and the service go immediately — the user asked to stand down
         // and should see that happen. Freeing the models trails behind, in order.
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

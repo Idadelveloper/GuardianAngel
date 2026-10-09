@@ -50,8 +50,16 @@ class CurrentUser(private val userDao: UserDao) {
 class RoomWakeWordStore(
     private val dao: WakeWordDao,
     private val currentUser: CurrentUser,
-    private val tokenizer: SentencePieceTokenizer?,
+    private val tokenizerProvider: () -> SentencePieceTokenizer?,
 ) {
+    constructor(
+        dao: WakeWordDao,
+        currentUser: CurrentUser,
+        tokenizer: SentencePieceTokenizer?,
+    ) : this(dao, currentUser, { tokenizer })
+
+    private val tokenizer: SentencePieceTokenizer? get() = tokenizerProvider()
+
     @OptIn(ExperimentalCoroutinesApi::class)
     fun observe(): Flow<WakeWord> = currentUser.observeId().flatMapLatest { userId ->
         if (userId == null) flowOf(WakeWord(phrase = "")) else dao.observe(userId).map { it.toModel() }
@@ -83,8 +91,10 @@ class RoomWakeWordStore(
      * hands-free activation at all, and refusing phrases on top of that would be
      * confusing rather than informative.
      */
-    fun canRepresent(phrase: String): Boolean =
-        phrase.isNotBlank() && (tokenizer == null || tokenizer.canRepresent(phrase))
+    fun canRepresent(phrase: String): Boolean {
+        val tok = tokenizer
+        return phrase.isNotBlank() && (tok == null || tok.canRepresent(phrase))
+    }
 
     suspend fun addVoiceSample() = update { it.copy(voiceSamples = it.voiceSamples + 1) }
 
@@ -140,20 +150,35 @@ class RoomCodewordRepository(
             }
         }
 
+    /**
+     * Saves a codeword, updating the seeded row for its tier rather than inserting
+     * beside it.
+     *
+     * The id is looked up by tier instead of being trusted from the caller. The
+     * onboarding screen built ids like `cw-safe` while seeding produced
+     * `cw-<userId>-safe`, so every phrase set during setup was written as a *new* row
+     * and the account ended up with eight codewords — four suggestions and four real
+     * ones, with the suggestions still live.
+     */
     override suspend fun updateCodeword(codeword: Codeword) {
         val userId = currentUser.requireId()
+        val existing = dao.findByTier(userId, codeword.tier.name)
+        val id = existing?.id ?: codeword.id.ifBlank { defaultId(userId, codeword.tier) }
         dao.upsert(
             CodewordEntity(
-                id = codeword.id,
+                id = id,
                 userId = userId,
                 tier = codeword.tier.name,
                 phrase = codeword.phrase.trim(),
+                // Saving through this path is always the user choosing a phrase; the
+                // seeded suggestions are written by seedDefaults, which does not.
+                isCustomised = true,
                 notifyAllContacts = codeword.notifyContactIds.isEmpty(),
                 isArmed = codeword.isArmed,
                 updatedAt = System.currentTimeMillis(),
             )
         )
-        dao.setNotifiedGuardians(codeword.id, codeword.notifyContactIds)
+        dao.setNotifiedGuardians(id, codeword.notifyContactIds)
     }
 
     override suspend fun rehearse(codewordId: String): Boolean {
@@ -162,16 +187,27 @@ class RoomCodewordRepository(
         return true
     }
 
-    /** Writes the default tiers for a new account. Existing rows are left alone. */
+    /**
+     * Writes the default tiers for a new account.
+     *
+     * Only fills in tiers that have no row yet, so it can run on every launch without
+     * overwriting a phrase the user chose. Seeded rows are left with `isCustomised`
+     * false — they are suggestions, and the UI must keep asking until she replaces them.
+     */
     suspend fun seedDefaults(userId: String) {
         val now = System.currentTimeMillis()
+        val missing = DEFAULT_PHRASES.filter { (tier, _) ->
+            dao.findByTier(userId, tier.name) == null
+        }
+        if (missing.isEmpty()) return
         dao.upsertAll(
-            DEFAULT_PHRASES.map { (tier, phrase) ->
+            missing.map { (tier, phrase) ->
                 CodewordEntity(
-                    id = "cw-${userId}-${tier.name.lowercase()}",
+                    id = defaultId(userId, tier),
                     userId = userId,
                     tier = tier.name,
                     phrase = phrase,
+                    isCustomised = false,
                     updatedAt = now,
                 )
             }
@@ -179,6 +215,10 @@ class RoomCodewordRepository(
     }
 
     private companion object {
+        /** Stable per user and tier, so a save can always find the row to update. */
+        fun defaultId(userId: String, tier: CodewordTier) =
+            "cw-$userId-${tier.name.lowercase()}"
+
         /** Suggestions, not secrets — onboarding asks the user to replace them. */
         val DEFAULT_PHRASES = listOf(
             CodewordTier.Safe to "marshmallow",
@@ -195,6 +235,7 @@ private fun CodewordEntity.toModel() = Codeword(
     phrase = phrase,
     notifyContactIds = emptyList(),
     isArmed = isArmed,
+    isCustomised = isCustomised,
 )
 
 /** The trusted circle, in Room. */

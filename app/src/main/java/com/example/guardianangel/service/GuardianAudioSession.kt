@@ -79,6 +79,10 @@ class GuardianAudioSession(
     private val onWakeWord: (String) -> Unit,
     /** Called whenever the reasoning tier raises its verdict. */
     private val onAssessment: (ThreatAssessment) -> Unit,
+    /** Called when a live segment transcript is emitted. */
+    private val onTranscriptDecoded: ((TranscriptChunk, Boolean, Int?) -> Unit)? = null,
+    /** Called when audio acoustic events are tagged. */
+    private val onEventsDetected: ((List<AudioEvent>, Int?) -> Unit)? = null,
 ) {
     private val detector = SherpaWakeWordDetector(context)
     private val transcriber = SherpaTranscriber(context)
@@ -385,18 +389,25 @@ class GuardianAudioSession(
         )
     }
 
+    private var latestDecibels: Int? = null
+
     private fun onTranscript(chunk: TranscriptChunk) {
         _state.value = _state.value.copy(
             transcript = (_state.value.transcript + chunk).takeLast(TRANSCRIPT_WINDOW),
         )
-        reassess(peakDecibels = null)
+        val isVerifiedUser = !speakers.hasUnknownVoice()
+        onTranscriptDecoded?.invoke(chunk, isVerifiedUser, latestDecibels)
+        reassess(peakDecibels = latestDecibels)
     }
 
     private fun onEvents(events: List<AudioEvent>, buffer: FloatArray) {
+        val db = estimateDecibels(buffer)
+        latestDecibels = db
         _state.value = _state.value.copy(
             events = (_state.value.events + events).takeLast(EVENT_WINDOW),
         )
-        reassess(peakDecibels = estimateDecibels(buffer))
+        onEventsDetected?.invoke(events, db)
+        reassess(peakDecibels = db)
     }
 
     /**

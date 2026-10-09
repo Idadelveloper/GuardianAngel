@@ -62,7 +62,20 @@ class FirebaseAuthRepository(
         awaitClose { auth.removeAuthStateListener(listener) }
     }
 
+    /**
+     * Resumes a session Firebase already holds.
+     *
+     * Deliberately does **not** sign in anonymously as a fallback. It used to, which
+     * meant a launch always ended up authenticated and the login screen could never be
+     * shown — the gate would be bypassed before it rendered. Starting a guest session is
+     * now an explicit choice, in [signInAnonymously].
+     */
     override suspend fun ensureSignedIn(): AuthResult {
+        auth.currentUser?.let { return AuthResult.Success(it.toAuthUser()) }
+        return AuthResult.Failure("Signed out.")
+    }
+
+    override suspend fun signInAnonymously(): AuthResult {
         auth.currentUser?.let { return AuthResult.Success(it.toAuthUser()) }
         return runCatching { auth.signInAnonymously().await() }
             .fold(

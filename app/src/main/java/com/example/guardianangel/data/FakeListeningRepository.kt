@@ -59,6 +59,7 @@ class FakeListeningRepository(
                 if (!permissions.hasNotifications()) {
                     add(ListeningRequirement.NotificationPermission)
                 }
+                if (!permissions.hasLocation()) add(ListeningRequirement.LocationPermission)
                 if (!word.isEnrolled) add(ListeningRequirement.WakeWordEnrolled)
                 if (!permissions.isBatteryExempt()) add(ListeningRequirement.BatteryExemption)
             }
