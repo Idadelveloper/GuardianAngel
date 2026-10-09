@@ -119,8 +119,8 @@ fun CodewordSetupScreen(
 
     GuardianWizardScaffold(
         modifier = modifier,
-        stepLabel = "Step 4 of 4 · Codeword ${index + 1} of ${TIER_COPY.size}",
-        progress = 0.75f + 0.25f * ((index + 1f) / TIER_COPY.size),
+        stepLabel = "Step 5 of 5 · Codeword ${index + 1} of ${TIER_COPY.size}",
+        progress = 0.8f + 0.2f * ((index + 1f) / TIER_COPY.size),
         onBack = { if (index == 0) onBack() else index-- },
         ctaLabel = if (isLast) "Finish setup & meet Angel" else "Next codeword",
         onCta = {
@@ -129,8 +129,9 @@ fun CodewordSetupScreen(
         ctaEnabled = canAdvance,
     ) {
         AngelSays(
-            message = "These are your quiet words. Say one naturally in conversation and " +
-                "I'll act — and if you say it by accident, I'll notice and stand down.",
+            message = "These come after your wake word. Once I'm recording, say one of " +
+                "these and I'll act — and if you say one by accident, I'll notice and " +
+                "stand down.",
             mood = AngelMood.Resting,
             mascotSize = 88.dp,
         )

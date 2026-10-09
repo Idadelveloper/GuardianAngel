@@ -34,7 +34,11 @@ import com.example.guardianangel.data.GuardianSamples
 import com.example.guardianangel.domain.model.CodewordTier
 import com.example.guardianangel.domain.model.GuardianMode
 import com.example.guardianangel.domain.model.GuardianSnapshot
+import com.example.guardianangel.domain.model.ListeningRequirement
+import com.example.guardianangel.domain.model.ListeningStatus
+import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.GuardianRepository
+import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianPrimaryButton
 import com.example.guardianangel.ui.components.GuardianTabScaffold
@@ -43,6 +47,7 @@ import com.example.guardianangel.ui.home.components.AngelHeroCard
 import com.example.guardianangel.ui.home.components.DuressTriggerCard
 import com.example.guardianangel.ui.home.components.GuardianTopBar
 import com.example.guardianangel.ui.home.components.GuardiansStrip
+import com.example.guardianangel.ui.home.components.HandsFreeCard
 import com.example.guardianangel.ui.home.components.MetricTile
 import com.example.guardianangel.ui.home.components.QuickActionRow
 import com.example.guardianangel.ui.home.components.RecentActivityCard
@@ -70,17 +75,37 @@ import com.example.guardianangel.ui.theme.GuardianTheme
 @Composable
 fun HomeRoute(
     repository: GuardianRepository,
+    listeningRepository: ListeningRepository,
     onOpenSession: (String) -> Unit,
     onPlanRoute: () -> Unit,
+    onSetUpWakeWord: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val viewModel: HomeViewModel = viewModel(factory = HomeViewModel.Factory(repository))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+
+    val handsFree = rememberHandsFreeController(listeningRepository)
+    val listeningStatus by listeningRepository.observeStatus()
+        .collectAsStateWithLifecycle(initialValue = ListeningStatus())
+    val wakeWord by listeningRepository.observeWakeWord()
+        .collectAsStateWithLifecycle(initialValue = WakeWord(phrase = ""))
+
     HomeScreen(
         state = state,
+        listeningStatus = listeningStatus,
+        wakeWord = wakeWord,
         onAction = viewModel::onAction,
         onOpenSession = onOpenSession,
         onPlanRoute = onPlanRoute,
+        onArm = handsFree::arm,
+        onDisarm = handsFree::disarm,
+        onFixBlocker = { requirement ->
+            when (requirement) {
+                ListeningRequirement.WakeWordEnrolled,
+                ListeningRequirement.VoiceProfile -> onSetUpWakeWord()
+                else -> handsFree.resolve(requirement)
+            }
+        },
         modifier = modifier,
     )
 }
@@ -92,14 +117,24 @@ fun HomeScreen(
     onOpenSession: (String) -> Unit,
     onPlanRoute: () -> Unit,
     modifier: Modifier = Modifier,
+    listeningStatus: ListeningStatus = ListeningStatus(),
+    wakeWord: WakeWord = WakeWord(phrase = ""),
+    onArm: () -> Unit = {},
+    onDisarm: () -> Unit = {},
+    onFixBlocker: (ListeningRequirement) -> Unit = {},
 ) {
     when (state) {
         HomeUiState.Loading -> LoadingState(modifier)
         is HomeUiState.Ready -> ReadyState(
             snapshot = state.snapshot,
+            listeningStatus = listeningStatus,
+            wakeWord = wakeWord,
             onAction = onAction,
             onOpenSession = onOpenSession,
             onPlanRoute = onPlanRoute,
+            onArm = onArm,
+            onDisarm = onDisarm,
+            onFixBlocker = onFixBlocker,
             modifier = modifier,
         )
     }
@@ -128,9 +163,14 @@ private fun LoadingState(modifier: Modifier = Modifier) {
 @Composable
 private fun ReadyState(
     snapshot: GuardianSnapshot,
+    listeningStatus: ListeningStatus,
+    wakeWord: WakeWord,
     onAction: (HomeAction) -> Unit,
     onOpenSession: (String) -> Unit,
     onPlanRoute: () -> Unit,
+    onArm: () -> Unit,
+    onDisarm: () -> Unit,
+    onFixBlocker: (ListeningRequirement) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val isRecording = snapshot.mode == GuardianMode.Recording
@@ -158,6 +198,14 @@ private fun ReadyState(
             message = angelMessage(snapshot, mood),
             badge = if (atHaven) "Standby" else snapshot.journey?.let { "Live" },
             badgeIcon = if (atHaven) GuardianIcons.Moon else GuardianIcons.Waveform,
+        )
+
+        HandsFreeCard(
+            status = listeningStatus,
+            wakeWord = wakeWord,
+            onArm = onArm,
+            onDisarm = onDisarm,
+            onFixBlocker = onFixBlocker,
         )
 
         // --- Recording takes over --------------------------------------------------

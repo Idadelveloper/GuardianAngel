@@ -2,6 +2,30 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+      Hands-free activation.
+
+      RECORD_AUDIO is a while-in-use permission, so continuing to listen with the phone
+      pocketed requires a foreground service typed "microphone". From Android 14 that
+      type additionally requires FOREGROUND_SERVICE_MICROPHONE. The service can only be
+      started while an activity is visible — Android has no exemption that would let
+      Angel arm herself on boot.
+    -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- Android 13+: needed to show the listening notification the service must display. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Location accompanies an alert so guardians know where to go. -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- A microphone is not optional for this app, but the absence of one should fail at
+         install time rather than halfway through a walk home. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="true" />
+
     <application
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -23,6 +47,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".service.GuardianListeningService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
     </application>
 
 </manifest>

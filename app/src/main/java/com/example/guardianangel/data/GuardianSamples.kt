@@ -114,7 +114,7 @@ object GuardianSamples {
 
     /** A snapshot in the given mode, with the rest of the state made consistent with it. */
     fun snapshot(mode: GuardianMode): GuardianSnapshot = GuardianSnapshot(
-        userFirstName = "Maya",
+        userFirstName = "Ida",
         userAvatarUrl = null,
         mode = mode,
         telemetry = telemetry,

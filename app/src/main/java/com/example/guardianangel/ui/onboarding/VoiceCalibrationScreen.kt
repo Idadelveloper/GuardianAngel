@@ -106,8 +106,8 @@ fun VoiceCalibrationScreen(
 
     GuardianWizardScaffold(
         modifier = modifier,
-        stepLabel = "Step 2 of 4 · Your voice",
-        progress = 0.5f,
+        stepLabel = "Step 2 of 5 · Your voice",
+        progress = 0.4f,
         onBack = onBack,
         ctaLabel = if (isComplete) "Save voiceprint & continue" else "Record a minute to continue",
         onCta = { onSave(clarity) },

@@ -58,32 +58,35 @@ fun AngelHeroCard(
             .padding(GuardianTheme.spacing.lg),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(contentAlignment = Alignment.BottomEnd) {
-            AngelMascot(mood = mood, size = mascotSize)
-            if (badge != null) {
-                Row(
-                    modifier = Modifier
-                        .clip(GuardianTheme.shapes.pill)
-                        .background(GuardianTheme.materialColors.surfaceContainerLowest)
-                        .border(1.dp, GuardianTheme.colors.borderDefault, GuardianTheme.shapes.pill)
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    if (badgeIcon != null) {
-                        Icon(
-                            imageVector = badgeIcon,
-                            contentDescription = null,
-                            tint = GuardianTheme.materialColors.primary,
-                            modifier = Modifier.size(13.dp),
-                        )
-                    }
-                    Text(
-                        text = badge,
-                        style = GuardianTheme.type.labelSm,
-                        color = GuardianTheme.materialColors.onSurface,
+        AngelMascot(mood = mood, size = mascotSize)
+
+        if (badge != null) {
+            // Sits under Angel rather than overlapping her. Anchored to her bottom-right
+            // it collided with the wing and heart, and the collision point moved with
+            // every mood because each tier has a different silhouette.
+            Spacer(Modifier.height(GuardianTheme.spacing.sm))
+            Row(
+                modifier = Modifier
+                    .clip(GuardianTheme.shapes.pill)
+                    .background(GuardianTheme.materialColors.surfaceContainerLowest)
+                    .border(1.dp, GuardianTheme.colors.borderDefault, GuardianTheme.shapes.pill)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                if (badgeIcon != null) {
+                    Icon(
+                        imageVector = badgeIcon,
+                        contentDescription = null,
+                        tint = GuardianTheme.materialColors.primary,
+                        modifier = Modifier.size(14.dp),
                     )
                 }
+                Text(
+                    text = badge,
+                    style = GuardianTheme.type.labelSm,
+                    color = GuardianTheme.materialColors.onSurface,
+                )
             }
         }
 

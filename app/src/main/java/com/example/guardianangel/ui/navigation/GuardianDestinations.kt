@@ -19,6 +19,7 @@ object Routes {
     const val PERMISSIONS = "onboarding/permissions"
     const val VOICE_CALIBRATION = "onboarding/voice"
     const val GUARDIAN_CONTACTS = "onboarding/guardians"
+    const val WAKE_WORD = "onboarding/wake-word"
     const val CODEWORD_SETUP = "onboarding/codewords"
 
     /** The main tabbed shell. */
@@ -33,6 +34,7 @@ object Routes {
     const val SETTINGS_CODEWORDS = "settings/codewords"
     const val SETTINGS_GUARDIANS = "settings/guardians"
     const val SETTINGS_VOICE = "settings/voice"
+    const val SETTINGS_WAKE_WORD = "settings/wake-word"
 
     fun sessionDetail(sessionId: String) = "session/$sessionId"
 }

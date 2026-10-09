@@ -91,8 +91,8 @@ fun GuardianContactsScreen(
 
     GuardianWizardScaffold(
         modifier = modifier,
-        stepLabel = "Step 3 of 4 · Your circle",
-        progress = 0.75f,
+        stepLabel = "Step 3 of 5 · Your circle",
+        progress = 0.6f,
         onBack = onBack,
         ctaLabel = "Save guardian & continue",
         onCta = { onSave(name.trim(), phone.trim(), relationship, shareGps, shareAudio) },

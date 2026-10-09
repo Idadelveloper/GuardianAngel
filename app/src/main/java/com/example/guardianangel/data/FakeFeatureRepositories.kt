@@ -46,7 +46,7 @@ class FakeAccountRepository(
             profile = if (startSignedIn) {
                 UserProfile(
                     id = "u1",
-                    fullName = "Maya Lin",
+                    fullName = "Ida Delphine",
                     phoneNumber = "+1 (555) 392-8174",
                     isPhoneVerified = true,
                 )

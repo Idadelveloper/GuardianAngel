@@ -125,4 +125,11 @@
     <string name="nav_map">Map</string>
     <string name="nav_activity">Activity</string>
     <string name="nav_settings">Settings</string>
+
+    <!-- Hands-free listening -->
+    <string name="listening_channel_name">Listening for your wake word</string>
+    <string name="listening_channel_description">Shown while Angel is listening so you always know when your microphone is in use.</string>
+    <string name="listening_notification_title">Angel is listening</string>
+    <string name="listening_notification_body">Say your wake word and I\'ll start recording.</string>
+    <string name="listening_notification_stop">Stand down</string>
 </resources>

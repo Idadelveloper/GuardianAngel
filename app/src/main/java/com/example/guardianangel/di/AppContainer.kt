@@ -5,12 +5,14 @@ import com.example.guardianangel.data.FakeActivityRepository
 import com.example.guardianangel.data.FakeCodewordRepository
 import com.example.guardianangel.data.FakeContactsRepository
 import com.example.guardianangel.data.FakeGuardianRepository
+import com.example.guardianangel.data.FakeListeningRepository
 import com.example.guardianangel.data.FakeRouteRepository
 import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.GuardianRepository
+import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.domain.repository.RouteRepository
 
 /**
@@ -32,6 +34,7 @@ interface AppContainer {
     val codewordRepository: CodewordRepository
     val activityRepository: ActivityRepository
     val routeRepository: RouteRepository
+    val listeningRepository: ListeningRepository
 }
 
 /**
@@ -49,4 +52,6 @@ class InMemoryAppContainer(
     override val codewordRepository: CodewordRepository = FakeCodewordRepository()
     override val activityRepository: ActivityRepository = FakeActivityRepository()
     override val routeRepository: RouteRepository = FakeRouteRepository()
+    override val listeningRepository: ListeningRepository =
+        FakeListeningRepository(startEnrolled = startSignedIn)
 }

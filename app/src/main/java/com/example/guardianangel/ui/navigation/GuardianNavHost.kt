@@ -36,10 +36,12 @@ import com.example.guardianangel.ui.onboarding.GuardianContactsRoute
 import com.example.guardianangel.ui.onboarding.PermissionsRoute
 import com.example.guardianangel.ui.onboarding.SignUpRoute
 import com.example.guardianangel.ui.onboarding.VoiceCalibrationRoute
+import com.example.guardianangel.ui.onboarding.WakeWordRoute
 import com.example.guardianangel.ui.settings.SettingsCodewordsRoute
 import com.example.guardianangel.ui.settings.SettingsGuardiansRoute
 import com.example.guardianangel.ui.settings.SettingsHubRoute
 import com.example.guardianangel.ui.settings.SettingsVoiceRoute
+import com.example.guardianangel.ui.settings.SettingsWakeWordRoute
 import com.example.guardianangel.ui.theme.GuardianTheme
 
 private const val TRANSITION_MILLIS = 280
@@ -123,6 +125,7 @@ private fun NavGraphBuilder.onboardingGraph(
         composable(Routes.PERMISSIONS) {
             PermissionsRoute(
                 repository = container.accountRepository,
+                listeningRepository = container.listeningRepository,
                 onBack = navController::popBackStack,
                 onContinue = { navController.navigate(Routes.VOICE_CALIBRATION) },
             )
@@ -138,6 +141,13 @@ private fun NavGraphBuilder.onboardingGraph(
             GuardianContactsRoute(
                 contactsRepository = container.contactsRepository,
                 accountRepository = container.accountRepository,
+                onBack = navController::popBackStack,
+                onContinue = { navController.navigate(Routes.WAKE_WORD) },
+            )
+        }
+        composable(Routes.WAKE_WORD) {
+            WakeWordRoute(
+                repository = container.listeningRepository,
                 onBack = navController::popBackStack,
                 onContinue = { navController.navigate(Routes.CODEWORD_SETUP) },
             )
@@ -167,8 +177,10 @@ private fun NavGraphBuilder.mainGraph(
         composable(Routes.HOME, enterTransition = { fadeThrough() }, exitTransition = { fadeAway() }) {
             HomeRoute(
                 repository = container.guardianRepository,
+                listeningRepository = container.listeningRepository,
                 onOpenSession = { navController.navigate(Routes.sessionDetail(it)) },
                 onPlanRoute = { navController.navigateToTab(Routes.MAP) },
+                onSetUpWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
             )
         }
         composable(Routes.MAP, enterTransition = { fadeThrough() }, exitTransition = { fadeAway() }) {
@@ -189,6 +201,8 @@ private fun NavGraphBuilder.mainGraph(
                 accountRepository = container.accountRepository,
                 contactsRepository = container.contactsRepository,
                 codewordRepository = container.codewordRepository,
+                listeningRepository = container.listeningRepository,
+                onOpenWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
                 onOpenCodewords = { navController.navigate(Routes.SETTINGS_CODEWORDS) },
                 onOpenGuardians = { navController.navigate(Routes.SETTINGS_GUARDIANS) },
                 onOpenVoice = { navController.navigate(Routes.SETTINGS_VOICE) },
@@ -226,6 +240,12 @@ private fun NavGraphBuilder.stackedGraph(
     composable(Routes.SETTINGS_GUARDIANS) {
         SettingsGuardiansRoute(
             repository = container.contactsRepository,
+            onBack = navController::popBackStack,
+        )
+    }
+    composable(Routes.SETTINGS_WAKE_WORD) {
+        SettingsWakeWordRoute(
+            repository = container.listeningRepository,
             onBack = navController::popBackStack,
         )
     }

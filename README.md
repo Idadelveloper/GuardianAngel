@@ -9,8 +9,10 @@ and transcribing, works out from the conversation whether the situation is actua
 escalating, and — only if it is — alerts the people you chose and shares your location.
 No fumbling for a phone, no obvious panic button, no sound.
 
-> **Status:** early build. The design system, the home screen and the data contracts are
-> in place; the speech pipeline, map and persistence layers are not yet wired up. See
+> **Status:** the full interface is built and navigable — Angel, four tabs, the setup
+> wizard and every sub-screen, running on sample data. What is *not* built is everything
+> behind it: the wake-word model itself, speech recognition, the escalation model,
+> persistence, real maps and live location. Treat it as a working prototype of the experience, not of the system. See
 > [Roadmap](#roadmap).
 
 ---
@@ -28,9 +30,10 @@ in a normal sentence eventually. The AI evaluates context before escalating, you
 notification you can act on, and stopping a recording is always one tap with no
 confirmation dialog. A safety app that cries wolf gets uninstalled.
 
-**It has to stay calm.** The interface is warm cream and soft rose, not red klaxons. A
+**It has to stay calm.** The interface is blush white and soft rose, not red klaxons. A
 person reading this screen may already be frightened; the UI's job is to lower their
-heart rate, not raise it.
+heart rate, not raise it. The one place that rule bends is Angel's critical tier, where a
+crimson strobe is exactly the point.
 
 ---
 
@@ -62,10 +65,27 @@ so nothing is lost if she is not perceived.
 
 ## Features
 
-### Codewords — four escalation tiers
+### Hands-free activation — two kinds of spoken trigger
 
-Each tier is a phrase you pick during onboarding. The AI weighs what it hears against the
-tier you invoked before acting.
+This is the distinction the whole product rests on, and the easiest one to muddle:
+
+| | **Wake word** | **Codewords** |
+|---|---|---|
+| When | Angel is on standby, nothing is recorded | Angel is already recording |
+| How many | One phrase | Four, one per escalation tier |
+| What it does | Wakes her and **starts** recording | Tells her **what to do** next |
+| How it is matched | Always-on keyword model, ~1 MB, on a battery budget | Against the live transcript, which already exists |
+| Where it is set | Onboarding step 4 · Settings → Wake word | Onboarding step 5 · Settings → Codewords |
+
+Getting this wrong is dangerous rather than merely confusing: a user who thinks her
+danger codeword wakes the app would say it into a phone that is not listening and assume
+help was coming. Onboarding therefore teaches the wake word *first*, on its own screen,
+with both kinds laid out side by side before a single codeword is set.
+
+#### The four codeword tiers
+
+Said while Angel is recording. She weighs what she hears against the tier you invoked
+before acting.
 
 | Tier | What saying it does |
 |---|---|
@@ -74,6 +94,33 @@ tier you invoked before acting.
 | **Danger** | Alerts your trusted circle with your live location |
 | **Emergency** | Calls emergency services *and* alerts your circle |
 
+#### What Android actually allows
+
+Hands-free listening is shaped by platform rules more than by product preference, so the
+app states them plainly rather than implying capabilities it cannot have:
+
+- `RECORD_AUDIO` is a **while-in-use** permission. Listening with the phone pocketed
+  requires a foreground service typed `microphone`, which from Android 14 also needs
+  `FOREGROUND_SERVICE_MICROPHONE`.
+- **That service cannot be started from the background.** Not on boot, not from a
+  broadcast — Android throws `ForegroundServiceStartNotAllowedException` and there is no
+  exemption an ordinary app can rely on. **So Angel cannot arm herself.** You arm her
+  from the home screen before you set off.
+- Once armed legally from a visible screen, she **keeps listening with the app closed and
+  the screen locked**. That is exactly what the `microphone` service type is for, and it
+  is what makes the real scenario work: arm before you walk home, then never touch the
+  phone again.
+- A persistent notification is mandatory while the microphone is held. For an app
+  listening to someone's surroundings that is the right thing to show anyway.
+- True always-on hotword with the app closed needs `AlwaysOnHotwordDetector` and the
+  SoundTrigger HAL, which are reserved for the device's default assistant. The UI says
+  so instead of pretending otherwise.
+
+The home screen's **Hands-free** card is where this lives: it arms listening, names the
+wake word while armed, and lists any missing permission with the one action that fixes
+it. A listening feature that silently does nothing because a permission was declined is
+worse than no feature at all.
+
 ### Recording & transcription
 
 When a codeword fires, the app records, transcribes, and attributes speech to separate
@@ -81,8 +128,10 @@ voices (yours is enrolled during setup). It flags danger signals in the transcri
 repeated refusals, raised voices, sounds that imply a struggle — and uses them, together
 with location and time of day, to decide whether to escalate.
 
-Transcripts are saved to a library where you can review, annotate, bookmark, export or
-delete them. Each one is pinned to where it was recorded.
+Every session lands in the Activity log with Angel's summary, the peak volume, the
+lowest safety score it reached, and the full diarized timeline. Each one is pinned to
+where it was recorded. Review, export and delete are modelled today; annotating and
+bookmarking are on the roadmap.
 
 ### Location Safety Score
 
@@ -104,10 +153,14 @@ on by hand. Demographic inputs are **opt-in only and off by default** — they c
 risk estimate, but silently profiling a user by race or age is not something an app should
 do on her behalf.
 
-### Safest-route navigation *(planned)*
+### Safest-route navigation
 
-The Map tab will route you by safest path rather than shortest, using the same data as the
-score, with your live location, a start and a destination.
+The Map tab routes by safest path rather than shortest, using the same data as the score.
+Pick a destination and it compares a well-lit corridor against the faster shortcut, with
+the safety score, lighting and safe-haven count for each. Committing to a route arms the
+guardian and starts the walk.
+
+*The routing and the map surface are both simulated — see the note under [Map](#map).*
 
 ### Safe Walk
 
@@ -116,9 +169,10 @@ guardians are notified automatically.
 
 ### Trusted circle
 
-Up to six emergency contacts, ranked, each with a name, relationship and number. The home
-screen shows who is actually reachable right now — knowing your top contact is offline
-*before* something happens is the point.
+Up to five emergency contacts, ranked, each with a name, relationship and number. The
+home screen shows who is actually reachable right now — knowing your top contact is
+offline *before* something happens is the point. Your first guardian cannot be removed;
+an empty circle would make every other feature pointless.
 
 ---
 
@@ -189,7 +243,8 @@ Two places where the reference was simplified deliberately:
 
 ## Design system
 
-Plus Jakarta Sans throughout, on a warm cream canvas with soft rose and apricot accents —
+Plus Jakarta Sans throughout, on a soft blush canvas (`#FFF8F8`) with rose and apricot
+accents and a protective midnight-navy (`#1E2238`) for type and high-contrast actions —
 closer to Partiful or Luma than to a security product.
 
 Everything lives in `ui/theme/` and is consumed through two accessors: `MaterialTheme` for
@@ -203,6 +258,10 @@ standard Material roles and `GuardianTheme` for the brand tokens Material has no
 - **Elevation** — ambient warm glows and tonal layering rather than hard drop shadows.
 - **Icons** — a hand-built stroke set (2px, round caps); Material's filled glyphs don't
   match the spec.
+- **Mascot** — Angel is part of the design system, not decoration bolted on: her tier
+  colours come from the same ramp as the safety score. See [Angel](#angel).
+- **Duress** — `#D50000` carries the SOS button label at 5.48:1; the brighter `#FF1744`
+  is reserved for auras and strobes, where it never has to pass a text contrast check.
 - **Dark mode** — a warm espresso night scheme, since this app gets used after dark.
 - **Accessibility** — every on-screen colour pairing is verified against WCAG 2.1 AA by
   `ColorContrastTest`, which fails the build if a pairing regresses. Where the design
@@ -224,6 +283,12 @@ domain/
 data/
   Fake*Repository           in-memory stand-ins, same shapes the real sources will emit
   *Samples                  sample content shared by the fakes and every @Preview
+audio/
+  AudioFeatures             log-mel + FFT front end, shared by any keyword model
+  KeywordSpotter            the model seam; LiteRT and stub implementations
+  WakeWordEngine            capture, sliding windows, matching, refractory period
+service/
+  GuardianListeningService  the microphone foreground service
 ui/
   theme/                    colour schemes, type scale, shapes, spacing, elevation,
                             the green-to-red safety ramp
@@ -247,6 +312,7 @@ encrypted Room table first while analytics stays derived.
 | `CodewordRepository` | the four tiers and their phrases | encrypted Room table |
 | `ActivityRepository` | sessions, transcript lines, analytics rollups | Room; analytics as a query |
 | `RouteRepository` | destinations and route planning | Room + routing service |
+| `ListeningRepository` | wake word, enrolment, sensitivity, permission state | Room + keystore template |
 | `GuardianRepository` | the live snapshot the home screen renders | composed from the above + sensors |
 
 Secrets are represented by their *status*, never their value: `VoiceProfile` carries a
@@ -261,20 +327,57 @@ is the only change needed, and no screen or view model knows the difference.
 Reads are `Flow` because the data is genuinely live: the score re-evaluates as the user
 moves, contacts come online, and a session accumulates transcript lines while open.
 
+### The wake-word model
+
+Users pick their **own** wake phrase, which rules out the usual approach of training one
+fixed-vocabulary classifier and shipping it. The workable design for user-defined
+keywords is few-shot enrolment:
+
+1. A frozen speech-embedding model turns a ~1.5 s window into a small vector.
+2. At setup the user says her phrase three times; the vectors are averaged into a
+   template stored on device.
+3. At runtime every window is embedded and compared by cosine similarity; above a
+   threshold, Angel wakes.
+
+Everything except step 1 is already built. `KeywordSpotter` is the seam:
+`LiteRtKeywordSpotter` runs a `.tflite` model from `assets/` through **LiteRT** (the
+successor runtime to TensorFlow Lite, `com.google.ai.edge.litert`), and
+`StubKeywordSpotter` stands in when no model is installed.
+
+**No model is committed to this repository.** The obvious candidate is the
+`speech_embedding` backbone that openWakeWord and several few-shot KWS papers build on —
+about 1 MB, a few milliseconds per window — but openWakeWord's *pre-trained* weights are
+CC BY-NC-SA 4.0, which is fine for a prototype and not fine for a shipped app. That is a
+licensing decision to make at integration time, not one to bake in here. Until a model is
+present the app says plainly that hands-free activation is unavailable rather than arming
+into silence.
+
+The stub deliberately **never** reports a match. A fake detector firing on a timer would
+make the hands-free path look like it worked, which for a safety app would be a genuinely
+dangerous thing to demo.
+
+Two further pieces are specified but not built: speaker verification (an ECAPA-TDNN-lite
+embedding compared against the voiceprint from the one-minute enrolment, so someone else
+saying your wake word does not start a recording — the toggle for it already exists), and
+transcript-side codeword matching once recording has started, which wants a small
+streaming ASR such as Vosk rather than a keyword model.
+
 ### Tech
 
 Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
-Coroutines + Flow · ViewModel · `minSdk` 24, `targetSdk` 37
+Coroutines + Flow · ViewModel · LiteRT 1.4.2 · `minSdk` 24, `targetSdk` 37
 
 ## Building
 
 ```bash
 ./gradlew :app:assembleDebug        # build
 ./gradlew :app:testDebugUnitTest    # unit tests, including the contrast guard
+./gradlew :app:lintDebug            # lint, including accessibility checks
 ./gradlew :app:installDebug         # install on a connected device
 ```
 
-Android Studio previews cover all three home screen states in light and dark.
+Seventeen `@Preview` functions across thirteen files cover every screen, including all
+three home states, both map states and the four onboarding steps.
 
 ---
 
@@ -292,6 +395,13 @@ Android Studio previews cover all three home screen states in light and dark.
 - [ ] **Localise the new screens.** The theme, navigation and original Home copy live in
       `strings.xml`; copy added with the Angel screens is still inline in the composables
       and needs a pass before any non-English build.
+- [x] Hands-free plumbing — mel/FFT front end, keyword-spotter seam, sliding-window
+      engine, microphone foreground service, permission flow and UI
+- [ ] **Drop in a wake-word model.** Everything above it is built; see
+      [The wake-word model](#the-wake-word-model) for the shape it must have and the
+      licensing decision to make first.
+- [ ] Speaker verification so only your voice wakes Angel (the toggle already exists)
+- [ ] Transcript-side codeword matching with a small streaming ASR
 - [ ] Persistence (Room) and real repository implementations
 - [ ] Real Maps SDK behind `RouteCanvas`, plus live location
 - [ ] Speech recognition, diarisation and on-device codeword spotting

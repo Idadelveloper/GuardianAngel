@@ -99,7 +99,7 @@ fun SignUpScreen(
             value = name,
             onValueChange = { name = it },
             label = "Full name",
-            placeholder = "Maya Lin",
+            placeholder = "Ida Delphine",
             leadingIcon = GuardianIcons.Users,
             modifier = Modifier.fillMaxWidth(),
         )

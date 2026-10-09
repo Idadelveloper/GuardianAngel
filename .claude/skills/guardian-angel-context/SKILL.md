@@ -24,6 +24,58 @@ need before touching code.
 
 When a decision is genuinely ambiguous, these three win over visual novelty.
 
+## Two kinds of spoken trigger — do not conflate these
+
+**Wake word** (`WakeWord`, `ListeningRepository`): one phrase, said while Angel is on
+standby. Wakes her and *starts* recording. Matched by an always-on keyword model with a
+hard battery budget. Set in onboarding step 4 and Settings → Wake word.
+
+**Codewords** (`Codeword`, `CodewordRepository`): four phrases, said while she is
+*already* recording, choosing what she does next. Matched against the transcript, which
+only exists once recording started. Onboarding step 5 and Settings → Codewords.
+
+Separate types, separate repositories, separate screens — on purpose. A user who thinks
+her danger codeword wakes the app would say it into a phone that is not listening. Never
+merge them, and never let one screen offer both.
+
+## What Android allows for hands-free listening
+
+Load-bearing platform facts; do not design around wishes:
+
+- `RECORD_AUDIO` is while-in-use. Background listening needs a `microphone` foreground
+  service plus `FOREGROUND_SERVICE_MICROPHONE` (Android 14+).
+- **The service cannot be started from the background** — not on boot, not from a
+  broadcast. `ForegroundServiceStartNotAllowedException`. Angel cannot arm herself; the
+  user arms her from a visible screen.
+- Once started legally it *does* keep capturing with the app closed and screen locked.
+- A persistent notification is mandatory.
+- `AlwaysOnHotwordDetector` / SoundTrigger is default-assistant only. Not available.
+
+`HandsFreeController` is the only place that touches permission and service APIs. It
+re-reads permissions on every `ON_RESUME` because the user can revoke them from Settings
+while backgrounded — showing "listening" over a revoked mic is the worst lie this app
+could tell.
+
+## The audio stack
+
+```
+audio/AudioFeatures      log-mel + FFT front end (no deps; parameters matter)
+audio/KeywordSpotter     the model seam + KeywordTemplate/buildTemplate
+audio/LiteRtKeywordSpotter   LiteRT (com.google.ai.edge.litert), model from assets/
+audio/StubKeywordSpotter     used when no model is installed
+audio/WakeWordEngine     capture, overlapping windows, matching, refractory period
+service/GuardianListeningService   the microphone FGS
+```
+
+No model is committed — openWakeWord's pre-trained weights are CC BY-NC-SA. The stub
+**never reports a match**; keep it that way. A fake detector that fired on a timer would
+make hands-free look like it worked, which for a safety app is dangerous to demo. When
+the detector is unavailable the UI must say so, never offer an Arm button that arms into
+silence.
+
+LiteRT is pinned to **1.4.2**: the 2.x Kotlin API is compiled with Kotlin 2.4 metadata
+and this project is on 2.2.10. 1.4.2 exposes the stable `org.tensorflow.lite.Interpreter`.
+
 ## Codeword tiers
 
 `CodewordTier`: `Safe` (cancel false alarm) → `Caution` (transcribe silently, notify
@@ -169,6 +221,8 @@ the running app can't drift. Add sample data there, not inline in a preview.
 - Copy added with the Angel screens is inline, not in `strings.xml` (tracked in the
   README roadmap). New user-facing text should go to resources where practical.
 - `RouteCanvas` is a stylised stand-in for a real map — no Maps SDK key exists yet.
+- The onboarding wizard is **5 steps** (permissions, voice, guardians, wake word,
+  codewords). Adding a step means renumbering every `stepLabel` and `progress`.
 
 ## Verifying
 

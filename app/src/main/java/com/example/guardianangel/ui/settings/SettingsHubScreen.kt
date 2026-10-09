@@ -32,9 +32,11 @@ import com.example.guardianangel.data.GuardianSamples
 import com.example.guardianangel.domain.model.AccountSnapshot
 import com.example.guardianangel.domain.model.Codeword
 import com.example.guardianangel.domain.model.EmergencyContact
+import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
+import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.ui.components.GuardianOutlinedButton
 import com.example.guardianangel.ui.components.GuardianTabScaffold
 import com.example.guardianangel.ui.home.components.InitialsAvatar
@@ -58,6 +60,8 @@ fun SettingsHubRoute(
     accountRepository: AccountRepository,
     contactsRepository: ContactsRepository,
     codewordRepository: CodewordRepository,
+    listeningRepository: ListeningRepository,
+    onOpenWakeWord: () -> Unit,
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
     onOpenVoice: () -> Unit,
@@ -71,11 +75,15 @@ fun SettingsHubRoute(
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val codewords by codewordRepository.observeCodewords()
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val wakeWord by listeningRepository.observeWakeWord()
+        .collectAsStateWithLifecycle(initialValue = null)
 
     SettingsHubScreen(
         account = account,
         contacts = contacts,
         codewords = codewords,
+        wakeWord = wakeWord,
+        onOpenWakeWord = onOpenWakeWord,
         onOpenCodewords = onOpenCodewords,
         onOpenGuardians = onOpenGuardians,
         onOpenVoice = onOpenVoice,
@@ -94,6 +102,8 @@ fun SettingsHubScreen(
     account: AccountSnapshot?,
     contacts: List<EmergencyContact>,
     codewords: List<Codeword>,
+    wakeWord: WakeWord?,
+    onOpenWakeWord: () -> Unit,
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
     onOpenVoice: () -> Unit,
@@ -184,6 +194,17 @@ fun SettingsHubScreen(
         SectionHeader(title = "Safeguards", icon = GuardianIcons.Shield)
 
         Column(verticalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
+            SettingsRow(
+                icon = GuardianIcons.Waveform,
+                title = "Wake word",
+                subtitle = wakeWord?.takeIf { it.isEnrolled }
+                    ?.let { "“${it.phrase}” · hands-free" }
+                    ?: "Not recorded yet",
+                trailing = {
+                    TonalPill(text = if (wakeWord?.isEnrolled == true) "Ready" else "Set up")
+                },
+                onClick = onOpenWakeWord,
+            )
             SettingsRow(
                 icon = GuardianIcons.Mic,
                 title = "Codewords & duress triggers",
@@ -317,6 +338,8 @@ private fun SettingsHubPreview() {
             account = null,
             contacts = GuardianSamples.contacts,
             codewords = GuardianSamples.codewords,
+            wakeWord = WakeWord(phrase = "hey angel", enrolmentTakes = 3),
+            onOpenWakeWord = {},
             onOpenCodewords = {}, onOpenGuardians = {}, onOpenVoice = {}, onSignOut = {},
         )
     }
