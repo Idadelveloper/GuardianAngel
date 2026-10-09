@@ -8,16 +8,21 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
+import kotlinx.coroutines.Dispatchers
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
 import com.example.guardianangel.MainActivity
 import com.example.guardianangel.R
-import com.example.guardianangel.audio.WakeWordEngine
+import com.example.guardianangel.appContainer
+import com.example.guardianangel.domain.model.CodewordTier
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -50,8 +55,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 class GuardianListeningService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob())
-    private var engine: WakeWordEngine? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var session: GuardianAudioSession? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -71,6 +76,7 @@ class GuardianListeningService : Service() {
     }
 
     private fun startListening() {
+        if (session != null) return
         createChannel()
         ServiceCompat.startForeground(
             this,
@@ -83,24 +89,94 @@ class GuardianListeningService : Service() {
             },
         )
         _state.value = true
+        beginSession()
+    }
+
+    /**
+     * Builds the audio session and starts listening.
+     *
+     * Everything is read from the process-wide container rather than passed in, because
+     * a service started from a notification action has no activity to hand it anything.
+     */
+    private fun beginSession() {
+        val container = appContainer
+        val listening = container.listeningRepository
+        val guardian = container.guardianRepository
+
+        scope.launch {
+            val wakeWord = listening.observeWakeWord().first()
+
+            val audio = GuardianAudioSession(
+                context = applicationContext,
+                scope = scope,
+                onWakeWord = {
+                    scope.launch {
+                        // A wake word only ever *starts* a recording. What happens next
+                        // is decided by the codewords said during it, or by the
+                        // reasoning tier — never by the wake word itself.
+                        listening.onWakeWordDetected()
+                        guardian.startRecording(trigger = null)
+                        updateNotification(recording = true)
+                    }
+                },
+                onAssessment = { assessment ->
+                    if (!assessment.recommendEscalation) return@GuardianAudioSession
+                    scope.launch {
+                        // The cheap tier only ever escalates to Danger. Emergency stays
+                        // reserved for the user's own emergency codeword: calling the
+                        // police is not a call a heuristic should make unprompted.
+                        guardian.dispatchAlert(CodewordTier.Danger)
+                    }
+                },
+            )
+            session = audio
+
+            val ready = audio.prepare(wakeWord.phrase)
+            listening.setDetectorReady(ready)
+            if (!ready) {
+                Log.w(TAG, "No wake-word model; listening cannot start")
+                stopListening()
+                return@launch
+            }
+            audio.start()
+        }
+    }
+
+    /**
+     * Swaps the notification text once recording begins, so the state is never hidden.
+     *
+     * Guarded because notifications can be revoked while the service is already running
+     * — the permission is checked when arming, not held forever. Losing the update is
+     * survivable; crashing the listener mid-walk is not, and the system notification
+     * that the microphone is in use stays regardless.
+     */
+    private fun updateNotification(recording: Boolean) {
+        val manager = NotificationManagerCompat.from(this)
+        if (!manager.areNotificationsEnabled()) return
+        try {
+            manager.notify(NOTIFICATION_ID, buildNotification(recording))
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Notification permission revoked while listening", e)
+        }
     }
 
     private fun stopListening() {
-        engine?.stop()
-        engine = null
+        session?.release()
+        session = null
         _state.value = false
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     override fun onDestroy() {
-        engine?.stop()
+        session?.release()
+        session = null
         scope.cancel()
         _state.value = false
         super.onDestroy()
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(recording: Boolean = false): Notification {
         val openApp = PendingIntent.getActivity(
             this,
             0,
@@ -116,8 +192,18 @@ class GuardianListeningService : Service() {
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(getString(R.string.listening_notification_title))
-            .setContentText(getString(R.string.listening_notification_body))
+            .setContentTitle(
+                getString(
+                    if (recording) R.string.recording_notification_title
+                    else R.string.listening_notification_title
+                )
+            )
+            .setContentText(
+                getString(
+                    if (recording) R.string.recording_notification_body
+                    else R.string.listening_notification_body
+                )
+            )
             .setContentIntent(openApp)
             // Standing down must be reachable without unlocking and hunting for the app.
             .addAction(0, getString(R.string.listening_notification_stop), stop)
@@ -150,6 +236,7 @@ class GuardianListeningService : Service() {
     }
 
     companion object {
+        private const val TAG = "ListeningService"
         private const val CHANNEL_ID = "guardian_listening"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.example.guardianangel.STOP_LISTENING"

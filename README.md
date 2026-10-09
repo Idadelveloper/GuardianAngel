@@ -299,6 +299,23 @@ ui/
   onboarding/ home/ map/ activities/ settings/
 ```
 
+### Storage and accounts
+
+Room, twelve tables, all hanging off one `users` row — full detail in
+**[docs/DATA_AND_AUTH.md](docs/DATA_AND_AUTH.md)**. Schemas are exported to
+`app/schemas/` and checked in, so every migration is a reviewable diff.
+
+Accounts start **anonymous**: sign-in happens silently on first launch, because someone
+downloading a safety app at 11pm should be protected before she is asked for an email
+address. Real credentials are *linked onto* that account later so her guardians and
+codewords come with her. Email/password and phone are implemented and need a Firebase
+project; without `google-services.json` the app keeps a real local account and says
+plainly that multi-device restore is unavailable.
+
+Cloud backup is opt-in from Settings and uploads guardians, codewords, safe places and
+session metadata. **Transcripts, the voiceprint and the disarm PIN are never uploaded** —
+and `CloudSync` is written so it cannot start doing so by accident.
+
 ### Where data will live
 
 Repositories are split by feature area rather than one god-object, so each can migrate
@@ -307,12 +324,13 @@ encrypted Room table first while analytics stays derived.
 
 | Repository | Owns | Likely storage |
 |---|---|---|
-| `AccountRepository` | profile, onboarding progress, permissions, voice profile, disarm PIN | Room + keystore |
-| `ContactsRepository` | the trusted circle | encrypted Room table |
-| `CodewordRepository` | the four tiers and their phrases | encrypted Room table |
+| `AccountRepository` | profile, onboarding progress, voice profile, disarm PIN | **Room + keystore** (done) |
+| `ContactsRepository` | the trusted circle | **Room** (done) |
+| `CodewordRepository` | the four tiers and their phrases | **Room** (done) |
 | `ActivityRepository` | sessions, transcript lines, analytics rollups | Room; analytics as a query |
 | `RouteRepository` | destinations and route planning | Room + routing service |
-| `ListeningRepository` | wake word, enrolment, sensitivity, permission state | Room + keystore template |
+| `ListeningRepository` | wake word, enrolment, sensitivity, permission state | **Room** (done) |
+| `AuthRepository` | who is signed in, and how | **Firebase, or local** (done) |
 | `GuardianRepository` | the live snapshot the home screen renders | composed from the above + sensors |
 
 Secrets are represented by their *status*, never their value: `VoiceProfile` carries a
@@ -335,8 +353,8 @@ it is worth it**. Full research, benchmarks and sources: **[docs/SPEECH_STACK.md
 | Tier | Runs | Job | Budget |
 |---|---|---|---|
 | 0 · VAD | always | Is anyone speaking? | ~1 MB, negligible |
-| 1 · Wake word | while armed | Should I start recording? | ~1 MB, few ms/window |
-| 2a · Streaming ASR | while recording | What is being said | ~40 MB, RTF ≈ 0.05 |
+| 1 · Wake word | while armed | Should I start recording? | 5 MB int8, few ms/window |
+| 2a · Streaming ASR | while recording | What is being said | 119 MB, RTF ≈ 0.05 |
 | 2b · Audio tagging | while recording | Scream, glass, raised voices | ~4 MB |
 | 2c · Diarization | while recording | How many voices, whose | ~8 MB |
 | 3 · Reasoning | on suspicion only | Is this escalating? | heuristic always, LLM rarely |
@@ -373,14 +391,23 @@ implementation; the wake-word engine; the microphone foreground service; and
 `HeuristicThreatAssessor` with tests pinning both failure modes — staying quiet when
 something is happening, and crying wolf when nothing is.
 
-Pending, and needing a human: the model files, the wake-word licence decision, and
-testing on a device with a real microphone. The checklist is
+The wake word runs on **sherpa-onnx keyword spotting** — Apache-2.0, 3.3 M parameters,
+open vocabulary, so any phrase registers at runtime with no retraining. `BpeTokenizer`
+turns a typed phrase into the tokens it expects. Phrase detection and speaker identity
+stay independent: the spotter decides *the phrase was said*, the CAM++ voiceprint decides
+*she said it*.
+
+Tiers 0–2c run end to end on device: one `AudioRecord` feeds the wake-word spotter while
+waiting, and a detection flips the same stream into the transcriber, audio tagger and
+speaker identifier. Still pending: tier 3's LLM assessor for the ambiguous band,
+persistence, and tuning thresholds against real speech. APK is 234 MB with models
+bundled — fine for sideloading, over Play's ceiling. Checklist:
 **[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
 
 ### Tech### Tech
 
 Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
-Coroutines + Flow · ViewModel · LiteRT 1.4.2 · sherpa-onnx (pending) ·
+Coroutines + Flow · ViewModel · LiteRT 1.4.2 · sherpa-onnx 1.13.8 ·
 `minSdk` 24, `targetSdk` 37
 
 ## Building
@@ -414,12 +441,20 @@ three home states, both map states and the four onboarding steps.
 - [x] Hands-free plumbing — mel/FFT front end, keyword-spotter seam, sliding-window
       engine, microphone foreground service, permission flow and UI
 - [x] Speech-stack architecture — tiered pipeline, all seams, heuristic reasoning tier
-- [ ] **Add sherpa-onnx and the model files.** Everything around them is built; see
-      [§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do).
-- [ ] Wake-word model, once the licence route is chosen
+- [x] sherpa-onnx integrated; ASR, wake word, VAD and speaker models in place
+- [x] Wake word on sherpa KWS — Apache-2.0, open vocabulary, verified loading on device
+- [x] Wake word wired end to end — detection starts a recording session
+- [x] YAMNet audio tagging — loading on device, danger classes mapped
+- [x] sherpa-backed transcriber (VAD + Moonshine) and speaker diarization
+- [ ] APK size: move models to first-run download or Play Asset Delivery
 - [ ] Speaker verification so only your voice wakes Angel (the toggle already exists)
 - [ ] LLM-backed reasoning for the ambiguous severity band
-- [ ] Persistence (Room) and real repository implementations
+- [x] Room database — twelve tables, exported schemas, Keystore-encrypted secrets
+- [x] Anonymous accounts, with email/password and phone linking ready for Firebase
+- [x] Opt-in cloud backup that cannot upload transcripts
+- [x] Contact picker, and real runtime permission requests in onboarding
+- [ ] Room-back the remaining repositories (sessions, analytics, routes)
+- [ ] SQLCipher for the whole database, not just the credential columns
 - [ ] Real Maps SDK behind `RouteCanvas`, plus live location
 - [ ] Speech recognition, diarisation and on-device codeword spotting
 - [ ] AI escalation model over the live transcript

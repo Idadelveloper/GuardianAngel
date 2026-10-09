@@ -9,6 +9,8 @@ import com.example.guardianangel.data.FakeListeningRepository
 import com.example.guardianangel.data.FakeRouteRepository
 import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.ActivityRepository
+import com.example.guardianangel.data.sync.CloudSync
+import com.example.guardianangel.domain.repository.AuthRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.GuardianRepository
@@ -35,6 +37,13 @@ interface AppContainer {
     val activityRepository: ActivityRepository
     val routeRepository: RouteRepository
     val listeningRepository: ListeningRepository
+    val authRepository: AuthRepository
+
+    /** Optional cloud backup. Reports Unavailable when no Firebase project is set up. */
+    val cloudSync: CloudSync
+
+    /** The signed-in user's id, for anything scoped to them. */
+    suspend fun currentUserId(): String
 }
 
 /**
@@ -54,4 +63,14 @@ class InMemoryAppContainer(
     override val routeRepository: RouteRepository = FakeRouteRepository()
     override val listeningRepository: ListeningRepository =
         FakeListeningRepository(startEnrolled = startSignedIn)
+    override val authRepository: AuthRepository =
+        com.example.guardianangel.data.auth.PreviewAuthRepository(startSignedIn)
+
+    // Previews never touch the network or a database.
+    override val cloudSync = CloudSync(
+        database = throw UnsupportedOperationException("previews do not sync"),
+        firestore = null,
+    )
+
+    override suspend fun currentUserId(): String = "preview-user"
 }

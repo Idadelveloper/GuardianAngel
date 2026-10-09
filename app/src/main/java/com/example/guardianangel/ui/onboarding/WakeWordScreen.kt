@@ -34,6 +34,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.guardianangel.audio.BpeTokenizer
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.ui.components.GuardianCard
@@ -104,15 +105,17 @@ fun WakeWordScreen(
         isRecordingTake = false
     }
 
-    val enoughTakes = takes >= WakeWord.MIN_TAKES
-    val canContinue = phrase.isNotBlank() && enoughTakes
+    // Typing the phrase is enough. The spotter is open-vocabulary, so there is nothing
+    // standing between setting a wake word and being protected by it.
+    val canContinue = phrase.isNotBlank()
+    val enoughSamples = takes >= WakeWord.RECOMMENDED_SAMPLES
 
     GuardianWizardScaffold(
         modifier = modifier,
         stepLabel = "Step 4 of 5 · Your wake word",
         progress = 0.8f,
         onBack = onBack,
-        ctaLabel = if (canContinue) "Save wake word" else "Say it ${WakeWord.MIN_TAKES - takes} more time${if (WakeWord.MIN_TAKES - takes == 1) "" else "s"}",
+        ctaLabel = "Save wake word",
         onCta = { onSave(phrase.trim(), takes) },
         ctaEnabled = canContinue,
     ) {
@@ -159,16 +162,34 @@ fun WakeWordScreen(
                 placeholder = "e.g. hey angel",
                 leadingIcon = GuardianIcons.Waveform,
                 supportingText = "Two or three syllables works best. Pick something you " +
-                    "wouldn't say by accident mid-conversation.",
+                    "wouldn't say by accident mid-conversation — try " +
+                    BpeTokenizer.CURATED_PHRASES.take(3).joinToString(", ") { "\"$it\"" } + ".",
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (phrase.isNotBlank()) {
-                Spacer(Modifier.height(GuardianTheme.spacing.lg))
+        }
+
+        // Optional, and framed that way. Samples do not teach Angel the phrase — she
+        // already knows it — they teach her *your voice*, so a stranger saying it cannot
+        // start a recording. Making this a gate would add a minute of setup for a
+        // protection that is worth having but not worth delaying everything else for.
+        if (phrase.isNotBlank()) {
+            GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Only wake for your voice",
+                        style = GuardianTheme.type.labelLg,
+                        color = GuardianTheme.materialColors.onSurface,
+                        modifier = Modifier.weight(1f),
+                    )
+                    TonalPill(text = "Optional")
+                }
+                Spacer(Modifier.height(GuardianTheme.spacing.xs))
                 Text(
-                    text = "Now say it ${WakeWord.MIN_TAKES} times so I learn how you say it",
-                    style = GuardianTheme.type.labelMd,
-                    color = GuardianTheme.materialColors.onSurface,
+                    text = "Say it a few times and I'll learn how you sound, so somebody " +
+                        "else saying your phrase won't start a recording.",
+                    style = GuardianTheme.type.bodySm,
+                    color = GuardianTheme.materialColors.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(GuardianTheme.spacing.md))
 
@@ -176,25 +197,25 @@ fun WakeWordScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    TakeDots(taken = takes, total = WakeWord.MIN_TAKES)
+                    TakeDots(taken = takes, total = WakeWord.RECOMMENDED_SAMPLES)
                     Spacer(Modifier.height(GuardianTheme.spacing.md))
                     RecordTakeButton(
                         isRecording = isRecordingTake,
-                        enabled = !enoughTakes,
+                        enabled = !enoughSamples,
                         onClick = { isRecordingTake = true },
                     )
                     Spacer(Modifier.height(GuardianTheme.spacing.sm))
                     Text(
                         text = when {
                             isRecordingTake -> "Listening…"
-                            enoughTakes -> "Got it — I'll know your voice."
+                            enoughSamples -> "Got it — I'll know your voice."
                             takes > 0 -> "Once more, in your normal voice."
-                            else -> "Tap and say \"${phrase.trim()}\""
+                            else -> "Tap and say \"${phrase.trim()}\" — or skip for now."
                         },
                         style = GuardianTheme.type.bodySm,
                         color = GuardianTheme.materialColors.onSurfaceVariant,
                     )
-                    if (takes > 0 && !enoughTakes) {
+                    if (takes > 0 && !enoughSamples) {
                         Spacer(Modifier.height(GuardianTheme.spacing.xs))
                         Text(
                             text = "Start over",

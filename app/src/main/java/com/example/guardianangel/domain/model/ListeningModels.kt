@@ -20,20 +20,38 @@ package com.example.guardianangel.domain.model
  * one, and the two very different runtime budgets stay visible in the code.
  */
 
-/** The phrase that wakes Angel and starts recording. */
+/**
+ * The phrase that wakes Angel and starts recording.
+ *
+ * Typing the phrase is **all that is required**. The keyword spotter behind it is
+ * open-vocabulary — it matches a phrase from its tokens, not from recordings of the user
+ * saying it — so there is no enrolment step standing between setup and protection.
+ *
+ * [voiceSamples] is therefore optional, and serves a different purpose: it builds the
+ * voiceprint that [requireVoiceMatch] checks, so somebody *else* saying the phrase
+ * cannot start a recording on her phone. Without samples that check simply cannot run,
+ * which is why it degrades to off rather than blocking.
+ */
 data class WakeWord(
     val phrase: String,
-    /** How many enrolment takes the user has recorded. Three is the practical minimum. */
-    val enrolmentTakes: Int = 0,
+    /** Recordings captured to build the voiceprint. Optional; improves voice matching. */
+    val voiceSamples: Int = 0,
     /** Only fire when the voice also matches the enrolled voiceprint. */
     val requireVoiceMatch: Boolean = true,
     /** How eagerly the spotter fires. Higher sensitivity catches whispers and more noise. */
     val sensitivity: ListeningSensitivity = ListeningSensitivity.Balanced,
 ) {
-    val isEnrolled: Boolean get() = phrase.isNotBlank() && enrolmentTakes >= MIN_TAKES
+    /** Ready to listen. A phrase is enough. */
+    val isEnrolled: Boolean get() = phrase.isNotBlank()
+
+    /** Enough samples for the voiceprint check to be meaningful. */
+    val canMatchVoice: Boolean get() = voiceSamples >= RECOMMENDED_SAMPLES
+
+    /** True when the user asked for voice matching but has not recorded enough for it. */
+    val voiceMatchUnavailable: Boolean get() = requireVoiceMatch && !canMatchVoice
 
     companion object {
-        const val MIN_TAKES = 3
+        const val RECOMMENDED_SAMPLES = 3
     }
 }
 
@@ -68,11 +86,8 @@ enum class ListeningRequirement {
     /** `POST_NOTIFICATIONS` — Android 13+ needs it to show the listening notification. */
     NotificationPermission,
 
-    /** The user has recorded their wake word enough times. */
+    /** No wake phrase has been set yet. */
     WakeWordEnrolled,
-
-    /** A voiceprint exists, needed when [WakeWord.requireVoiceMatch] is on. */
-    VoiceProfile,
 
     /** Battery optimisation exemption. Not fatal, but long walks get killed without it. */
     BatteryExemption,

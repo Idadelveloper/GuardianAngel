@@ -72,13 +72,23 @@ data class EmergencyContact(
     val avatarUrl: String? = null,
 ) {
     /** Initials fallback for when there is no avatar to show. */
-    val initials: String
-        get() = name.split(' ')
-            .filter { it.isNotBlank() }
-            .take(2)
-            .map { it.first().uppercaseChar() }
-            .joinToString("")
+    val initials: String get() = initialsOf(name)
 }
+
+/**
+ * Up to two initials from a name, or a placeholder when there is no name yet.
+ *
+ * Shared because the obvious one-liner throws on a blank name, and a freshly created
+ * anonymous account has exactly that until the user types one — which is how it reached
+ * a crash on the Settings screen rather than being caught in review.
+ */
+fun initialsOf(name: String, fallback: String = "?"): String =
+    name.split(' ')
+        .filter { it.isNotBlank() }
+        .take(2)
+        .mapNotNull { it.firstOrNull()?.uppercaseChar() }
+        .joinToString("")
+        .ifEmpty { fallback }
 
 /** One input into the safety score, shown to the user so the number is never a black box. */
 data class SafetyFactor(

@@ -22,6 +22,7 @@ import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianCheckbox
+import com.example.guardianangel.ui.components.GuardianOutlinedButton
 import com.example.guardianangel.ui.components.GuardianTextField
 import com.example.guardianangel.ui.components.GuardianWizardScaffold
 import com.example.guardianangel.ui.icons.GuardianIcons
@@ -87,6 +88,11 @@ fun GuardianContactsScreen(
     var shareGps by remember { mutableStateOf(true) }
     var shareAudio by remember { mutableStateOf(true) }
 
+    val pickContact = rememberContactPicker { picked ->
+        name = picked.name
+        phone = picked.phoneNumber
+    }
+
     val canSave = name.isNotBlank() && phone.length >= 7
 
     GuardianWizardScaffold(
@@ -106,6 +112,22 @@ fun GuardianContactsScreen(
         )
 
         GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
+            // Offered before the manual fields: typing a number from memory is both
+            // slower and a chance to get a digit wrong, and a guardian with a wrong
+            // number is worse than no guardian because it looks set up.
+            GuardianOutlinedButton(
+                text = "Choose from contacts",
+                onClick = pickContact,
+                leadingIcon = GuardianIcons.Users,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(GuardianTheme.spacing.md))
+            Text(
+                text = "or enter their details",
+                style = GuardianTheme.type.labelSm,
+                color = GuardianTheme.materialColors.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(GuardianTheme.spacing.sm))
             GuardianTextField(
                 value = name,
                 onValueChange = { name = it },

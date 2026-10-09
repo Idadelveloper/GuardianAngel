@@ -101,8 +101,7 @@ fun HomeRoute(
         onDisarm = handsFree::disarm,
         onFixBlocker = { requirement ->
             when (requirement) {
-                ListeningRequirement.WakeWordEnrolled,
-                ListeningRequirement.VoiceProfile -> onSetUpWakeWord()
+                ListeningRequirement.WakeWordEnrolled -> onSetUpWakeWord()
                 else -> handsFree.resolve(requirement)
             }
         },

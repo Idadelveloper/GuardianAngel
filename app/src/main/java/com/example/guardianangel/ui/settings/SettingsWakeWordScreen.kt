@@ -114,7 +114,7 @@ fun SettingsWakeWordScreen(
                     modifier = Modifier.weight(1f),
                 )
                 TonalPill(
-                    text = if (wakeWord.isEnrolled) "Ready" else "Needs recording",
+                    text = if (wakeWord.isEnrolled) "Ready" else "Not set",
                     icon = if (wakeWord.isEnrolled) GuardianIcons.Check else GuardianIcons.Warning,
                 )
             }
@@ -126,32 +126,13 @@ fun SettingsWakeWordScreen(
                 placeholder = "e.g. hey angel",
                 leadingIcon = GuardianIcons.Waveform,
                 supportingText = if (phraseChanged) {
-                    "Changing this clears your recordings — I'll need to hear the new one."
+                    "Save and I'll start listening for the new phrase."
                 } else {
-                    "Recorded ${wakeWord.enrolmentTakes} of ${WakeWord.MIN_TAKES} times."
+                    "This is all I need to wake up."
                 },
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (!phraseChanged) {
-                Spacer(Modifier.height(GuardianTheme.spacing.md))
-                Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
-                    GuardianOutlinedButton(
-                        text = if (wakeWord.isEnrolled) "Record again" else "Record a take",
-                        onClick = onAddTake,
-                        leadingIcon = GuardianIcons.Mic,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (wakeWord.enrolmentTakes > 0) {
-                        GuardianOutlinedButton(
-                            text = "Reset",
-                            onClick = onClearEnrolment,
-                            leadingIcon = GuardianIcons.Refresh,
-                            modifier = Modifier.weight(1f),
-                        )
-                    }
-                }
-            }
         }
 
         GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
@@ -192,6 +173,41 @@ fun SettingsWakeWordScreen(
                     onCheckedChange = onRequireVoiceMatch,
                 )
             }
+
+            // Voice samples are optional and only matter for the check above, so they
+            // live with it rather than beside the phrase — recording them is never a
+            // condition of Angel waking up.
+            if (wakeWord.requireVoiceMatch) {
+                Spacer(Modifier.height(GuardianTheme.spacing.md))
+                Text(
+                    text = if (wakeWord.canMatchVoice) {
+                        "I've heard your voice ${wakeWord.voiceSamples} times — enough to tell it apart."
+                    } else {
+                        "Record your voice ${WakeWord.RECOMMENDED_SAMPLES - wakeWord.voiceSamples} " +
+                            "more times so I can tell it from someone else's. Until then I'll " +
+                            "wake for anyone who says your phrase."
+                    },
+                    style = GuardianTheme.type.bodySm,
+                    color = GuardianTheme.materialColors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(GuardianTheme.spacing.sm))
+                Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
+                    GuardianOutlinedButton(
+                        text = if (wakeWord.canMatchVoice) "Record again" else "Record my voice",
+                        onClick = onAddTake,
+                        leadingIcon = GuardianIcons.Mic,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (wakeWord.voiceSamples > 0) {
+                        GuardianOutlinedButton(
+                            text = "Reset",
+                            onClick = onClearEnrolment,
+                            leadingIcon = GuardianIcons.Refresh,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+            }
         }
 
         AssuranceCard(
@@ -209,7 +225,7 @@ fun SettingsWakeWordScreen(
 private fun SettingsWakeWordPreview() {
     GuardianAngelTheme {
         SettingsWakeWordScreen(
-            wakeWord = WakeWord(phrase = "hey angel", enrolmentTakes = 3),
+            wakeWord = WakeWord(phrase = "hey angel", voiceSamples = 3),
             onBack = {}, onSavePhrase = {}, onAddTake = {}, onClearEnrolment = {},
             onRequireVoiceMatch = {}, onSensitivity = {},
         )

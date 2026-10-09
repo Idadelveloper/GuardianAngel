@@ -1,6 +1,17 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.ksp)
+    // Firebase is optional at build time. The google-services plugin hard-fails when
+    // google-services.json is absent, which would make the project unbuildable for
+    // anyone who has not created a Firebase project yet. Declaring it `apply false`
+    // here and applying it below only when the file exists keeps the app fully
+    // functional offline, and lights Firebase up the moment a config is dropped in.
+    alias(libs.plugins.google.services) apply false
+}
+
+if (file("google-services.json").exists()) {
+    apply(plugin = libs.plugins.google.services.get().pluginId)
 }
 
 android {
@@ -17,6 +28,14 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            // sherpa-onnx ships 121 MB of native libraries across four ABIs. armeabi-v7a
+            // and x86 are 57 MB of that and reach essentially nobody: 32-bit ARM phones
+            // cannot comfortably run this stack anyway, and x86 is emulator-only.
+            // x86_64 is kept so the app still runs on a development emulator.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -34,6 +53,16 @@ android {
     buildFeatures {
         compose = true
     }
+
+
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+}
+
+// Exported Room schemas are checked in, so a migration becomes a reviewable diff rather
+// than something discovered when a user's database fails to open.
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+    arg("room.generateKotlin", "true")
 }
 
 dependencies {
@@ -50,6 +79,22 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.kotlinx.coroutines.android)
+
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.datastore.preferences)
+
+    // Firebase: compiled in always so the code is type-checked, but only initialised at
+    // runtime when google-services.json supplied a project. See FirebaseAvailability.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.ai)
+    implementation(libs.firebase.appcheck.debug)
+
+    // Gives Firebase's Task API a suspend bridge (`Task.await()`).
+    implementation(libs.kotlinx.coroutines.play.services)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.litert)
     implementation(libs.androidx.compose.ui)
@@ -59,6 +104,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
+    androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

@@ -14,8 +14,8 @@ evidence was thin or pointed the other way from what I expected, that is said pl
 | Tier | Runs | Job | Budget |
 |---|---|---|---|
 | 0 · VAD | always | Is anyone speaking? | ~1 MB, negligible |
-| 1 · Wake word | while armed | Should I start recording? | ~1 MB, few ms/window |
-| 2a · Streaming ASR | while recording | What is being said | ~40 MB, RTF ≈ 0.05 |
+| 1 · Wake word | while armed | Should I start recording? | 5 MB int8, few ms/window |
+| 2a · Streaming ASR | while recording | What is being said | 119 MB, RTF ≈ 0.05 |
 | 2b · Audio tagging | while recording | Scream, glass, raised voices | ~4 MB |
 | 2c · Diarization | while recording | How many voices, whose | ~8 MB |
 | 3 · Reasoning | on suspicion only | Is this actually escalating? | heuristic always; LLM rarely |
@@ -150,11 +150,17 @@ front end; `KeywordSpotter` with a LiteRT implementation; the wake-word engine; 
 microphone foreground service; `HeuristicThreatAssessor` with tests pinning both failure
 modes (staying quiet when something is happening, and crying wolf when nothing is).
 
-**Pending:** the model files themselves, and the sherpa-onnx-backed implementations of
-`SpeechTranscriber`, `AudioTagger` and the diarizer.
+Also built and loading on device: `SherpaWakeWordDetector` (tier 1) and
+`YamnetAudioTagger` (tier 2b), with `BpeTokenizer` for runtime wake phrases.
 
-No model is committed. Beyond size, it is a licensing decision: openWakeWord's
-*pre-trained* weights are CC BY-NC-SA 4.0 — fine for a prototype, not for shipping.
+Tiers 0–2c are now wired end to end. `GuardianAudioSession` owns a single `AudioRecord`
+— Android grants the microphone to one capture at a time, and sharing the stream is what
+makes the cascade cheap — and routes each buffer by phase: the wake-word spotter while
+waiting, then the transcriber, tagger and speaker identifier once a detection flips it
+into recording.
+
+**Pending:** tier 3's LLM assessor for the ambiguous band, persisting sessions, and
+real-speech tuning of the detection thresholds.
 
 ---
 
@@ -171,37 +177,109 @@ microphone.
 3. Expect roughly 15–25 MB per ABI. Consider an ABI split or Play Feature Delivery before
    shipping.
 
-### 8.2 Download the models
+### 8.2 The models — what goes where
 
-Put these in `app/src/main/assets/` (or, better, download on first run so the APK stays
-small):
+All of these live in `app/src/main/assets/`.
 
-| Purpose | Model | Where |
+| Purpose | File / directory | Size |
 |---|---|---|
-| Streaming ASR | `sherpa-onnx-moonshine-tiny-en-int8` | [sherpa-onnx models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) |
-| VAD | `silero_vad.onnx` | [sherpa-onnx VAD models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) |
-| Speaker ID / diarization | 3D-Speaker or WeSpeaker embedding | [speaker models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models) |
-| Audio tagging | YAMNet TFLite | [TF Hub / Kaggle Models](https://www.kaggle.com/models/google/yamnet) |
-| Wake word embedding | `speech_embedding` → `assets/speech_embedding.tflite` | see §8.3 |
+| Streaming ASR | `sherpa-onnx-moonshine-tiny-en-int8/` | 119 MB |
+| Wake word | `sherpa-onnx-kws-zipformer-gigaspeech/` | 13 MB |
+| VAD | `silero_vad.onnx` | 0.6 MB |
+| Speaker ID | `3dspeaker_speech_campplus_sv_en_voxceleb_16k.onnx` | 28 MB |
+| Audio tagging | `yamnet.tflite` + `yamnet_class_map.csv` | 3.9 MB |
 
-### 8.3 Decide the wake-word model licence
+Three things worth knowing, learned the hard way:
 
-The wake-word path expects a frozen speech-embedding model at
-`assets/speech_embedding.tflite`. Three routes:
+- **Extract the archives.** Assets are bundled byte-for-byte, so a `.tar.bz2` left in
+  place ships 100 MB of compressed data the app cannot read.
+- **Delete `test_wavs/`** from each model directory, and the non-int8 duplicates. The KWS
+  download ships both an 11 MB fp32 encoder and a 3.8 MB int8 one; only the int8 is used.
+- **YAMNet must be the TFLite build, not the SavedModel.** Kaggle's default download is
+  a TensorFlow SavedModel (`saved_model.pb` + `variables/`), which Android cannot load.
+  The converted model is at
+  `https://storage.googleapis.com/mediapipe-models/audio_classifier/yamnet/float32/latest/yamnet.tflite`
+  — 3.9 MB, no TensorFlow install needed. Keep `yamnet_class_map.csv` from the SavedModel
+  download; it maps the 521 output indices to names.
+- **Use the fp32 KWS encoder, not int8.** Both int8 conversions — the standard one and
+  the `-mobile` variant — abort inside onnxruntime about a second into streaming: a
+  Zipformer downsample reshape receives 17 frames where it needs an even 16
+  (`Input shape:{17,1,128}, requested shape:{8,2,1,128}`). It is a native `SIGABRT`, so
+  no Kotlin `try`/`catch` contains it — the process simply dies. fp32 costs ~8 MB more
+  and works. The decoder and joiner are fp32 for the same reason.
+- **One speaker model is enough.** CAM++ (28 MB) and WeSpeaker ResNet152 (79 MB) do the
+  same job; ResNet152 is far too heavy for a phone. The spare has been moved to
+  `model-archive/` outside the build.
 
-- **openWakeWord's pre-trained embedding** — easiest, but CC BY-NC-SA 4.0. Fine for the
-  hackathon, blocks commercial release.
-- **Train your own** on openWakeWord's Apache-2.0 *code* with synthetic data (their Colab
-  is about an hour). Clean licence, needs a GPU session.
-- **sherpa-onnx keyword spotting** instead of the embedding approach — Apache-2.0
-  throughout, at the cost of the few-shot "any phrase the user invents" behaviour.
+### 8.3 Wake word — resolved, nothing further to download
 
-Tell me which and I will wire it.
+~~Pick between three licence routes.~~ **Settled: sherpa-onnx keyword spotting.**
+
+The original plan was a frozen speech-embedding model with few-shot enrolment, which
+would have meant openWakeWord's CC BY-NC-SA weights and no path to a commercial release.
+sherpa-onnx's keyword spotter reaches the same place and is strictly better here:
+
+- **Apache-2.0 throughout** — no licence ceiling.
+- **3.3 M parameters, ~5 MB int8** — comparable to the embedding model it replaces.
+- **Open vocabulary.** Any phrase registers at runtime via
+  `KeywordSpotter.createStream(tokens)`. No retraining, no enrolment takes.
+- It is in the AAR you already downloaded.
+
+`BpeTokenizer` converts a typed phrase into the tokens the spotter expects
+(`"hey angel"` → `"▁HE Y ▁AN GE L"`).
+
+**One honest caveat.** That tokeniser is greedy longest-match over the model's 500-token
+vocabulary, not a faithful re-implementation of SentencePiece's merge ordering. Against
+the nine reference phrases sherpa ships it reproduces seven exactly; the other two give a
+different but still valid segmentation. Detection still works — every token is in the
+vocabulary — but the threshold for those phrases may sit slightly differently. Hence
+`BpeTokenizer.CURATED_PHRASES`: five verified, acoustically distinct suggestions the UI
+can lead with while still accepting anything.
+
+#### What changed in the app
+
+`SherpaWakeWordDetector` replaces the embedding path. Phrase detection and speaker
+identity are now two independent checks rather than one model doing both: the spotter
+decides *the phrase was said*, and the CAM++ voiceprint decides *she said it* when
+"only wake for my voice" is on. Easier to tune, since a missed wake and a wrong-speaker
+wake have very different costs.
+
+Verified loading on a device:
+
+```
+I SherpaWakeWord: Keyword spotter loaded
+I SherpaWakeWord: Listening for "hey angel" as [▁HE Y ▁AN GE L]
+I SherpaTranscriber: Transcriber loaded
+I SpeakerId:      Speaker extractor loaded: 512-d embeddings
+I YamnetTagger:   YAMNet loaded: 15600 samples in, 521 classes out
+I GuardianAudio:  Capture started
+```
+
+The foreground service reports `isForeground=true types=0x00000080` — `0x80` is
+`FOREGROUND_SERVICE_TYPE_MICROPHONE` — started from `PROC_STATE_TOP`, which is the only
+state Android permits.
+
+### 8.3b APK size — a decision you will have to make
+
+With all models bundled the debug APK is **220 MB**. That installs and runs fine for
+testing, but it is over Play's 150 MB APK ceiling, and Moonshine alone is 119 MB of it.
+
+Already done: ABI filtering to `arm64-v8a` and `x86_64`, which cut 57 MB of native
+libraries that only reached 32-bit ARM and emulator-x86 targets.
+
+Before shipping, pick one:
+
+- **Download models on first run** into `filesDir` instead of bundling. Keeps the APK
+  small, needs network during setup, and is what most on-device-AI apps do.
+- **Play Asset Delivery**, which is the sanctioned route for large model files.
+- **A smaller ASR.** Moonshine Tiny was chosen for latency, not size; a streaming
+  Zipformer is roughly a third the size at somewhat worse RTF.
 
 ### 8.4 Things only you can test
 
-- **Say the wake word on a real device.** Emulators have no usable microphone; false
-  accept and false reject rates are meaningless without real speech in real rooms.
+- **Say the wake word on a real device.** The model is confirmed loading, but emulators
+  have no usable microphone — false accept and false reject rates are meaningless
+  without real speech in real rooms. Try the curated phrases first, then your own.
 - **Walk around for an hour with it armed** and report the battery delta. The 3–5%/10h
   figure is from the literature, not from this app.
 - **Try to make it cry wolf** — a loud bar, an argument on TV, a film with screaming.

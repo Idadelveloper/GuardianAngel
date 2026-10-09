@@ -25,7 +25,7 @@ class FakeListeningRepository(
 
     private val wakeWord = MutableStateFlow(
         if (startEnrolled) {
-            WakeWord(phrase = "hey angel", enrolmentTakes = WakeWord.MIN_TAKES)
+            WakeWord(phrase = "hey angel", voiceSamples = WakeWord.RECOMMENDED_SAMPLES)
         } else {
             WakeWord(phrase = "")
         }
@@ -51,12 +51,11 @@ class FakeListeningRepository(
             hasVoiceProfile,
             detectorReady,
             state,
-        ) { word, perms, voice, ready, current ->
+        ) { word, perms, _, ready, current ->
             val blocked = buildList {
                 if (!perms.microphone) add(ListeningRequirement.MicrophonePermission)
                 if (!perms.notifications) add(ListeningRequirement.NotificationPermission)
                 if (!word.isEnrolled) add(ListeningRequirement.WakeWordEnrolled)
-                if (word.requireVoiceMatch && !voice) add(ListeningRequirement.VoiceProfile)
                 if (!perms.batteryExempt) add(ListeningRequirement.BatteryExemption)
             }
             ListeningStatus(
@@ -72,16 +71,17 @@ class FakeListeningRepository(
         }
 
     override suspend fun setWakeWordPhrase(phrase: String) {
-        // Changing the phrase invalidates the template built from the old one.
-        wakeWord.update { it.copy(phrase = phrase.trim(), enrolmentTakes = 0) }
+        // The spotter works from the phrase alone, so changing it does not invalidate
+        // the voiceprint — that belongs to her voice, not to this phrase.
+        wakeWord.update { it.copy(phrase = phrase.trim()) }
         state.value = ListeningState.Off
     }
 
     override suspend fun addEnrolmentTake() =
-        wakeWord.update { it.copy(enrolmentTakes = it.enrolmentTakes + 1) }
+        wakeWord.update { it.copy(voiceSamples = it.voiceSamples + 1) }
 
     override suspend fun clearEnrolment() =
-        wakeWord.update { it.copy(enrolmentTakes = 0) }
+        wakeWord.update { it.copy(voiceSamples = 0) }
 
     override suspend fun setRequireVoiceMatch(enabled: Boolean) =
         wakeWord.update { it.copy(requireVoiceMatch = enabled) }

@@ -94,8 +94,14 @@ audio/WakeWordEngine     capture, overlapping windows, matching, refractory peri
 service/GuardianListeningService   the microphone FGS
 ```
 
-No model is committed — openWakeWord's pre-trained weights are CC BY-NC-SA. The stub
-**never reports a match**; keep it that way. A fake detector that fired on a timer would
+Wake word runs on **sherpa-onnx KWS** (`SherpaWakeWordDetector`), not the embedding
+path — Apache-2.0, 3.3 M params, open vocabulary via `KeywordSpotter.createStream`.
+`BpeTokenizer` converts a typed phrase to tokens; it is greedy longest-match, matching
+upstream on 7 of 9 reference phrases, so prefer `BpeTokenizer.CURATED_PHRASES` in UI.
+Speaker identity is a *separate* check (CAM++ voiceprint), not part of the spotter.
+
+The LiteRT embedding path (`KeywordSpotter`/`StubKeywordSpotter`) is retained as the
+alternative. Its stub **never reports a match**; keep it that way. A fake detector that fired on a timer would
 make hands-free look like it worked, which for a safety app is dangerous to demo. When
 the detector is unavailable the UI must say so, never offer an Arm button that arms into
 silence.
@@ -248,6 +254,9 @@ the running app can't drift. Add sample data there, not inline in a preview.
 - Copy added with the Angel screens is inline, not in `strings.xml` (tracked in the
   README roadmap). New user-facing text should go to resources where practical.
 - `RouteCanvas` is a stylised stand-in for a real map — no Maps SDK key exists yet.
+- Models live in `app/src/main/assets/`; the debug APK is ~220 MB. ABI filters are set to
+  `arm64-v8a` + `x86_64` — do not re-add armeabi-v7a/x86 (57 MB for nobody). Extract
+  archives and delete `test_wavs/` before committing any new model.
 - The onboarding wizard is **5 steps** (permissions, voice, guardians, wake word,
   codewords). Adding a step means renumbering every `stepLabel` and `progress`.
 

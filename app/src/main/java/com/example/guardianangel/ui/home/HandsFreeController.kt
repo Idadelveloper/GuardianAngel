@@ -20,6 +20,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.example.guardianangel.domain.model.ListeningRequirement
 import com.example.guardianangel.domain.repository.ListeningRepository
+import com.example.guardianangel.audio.SherpaWakeWordDetector
+import com.example.guardianangel.audio.YamnetAudioTagger
 import com.example.guardianangel.service.GuardianListeningService
 import kotlinx.coroutines.launch
 
@@ -43,6 +45,29 @@ class HandsFreeController(
     private val requestNotifications: () -> Unit,
     private val scope: kotlinx.coroutines.CoroutineScope,
 ) {
+    /**
+     * Loads the wake-word model once and reports whether it is usable.
+     *
+     * Done here rather than lazily at arm time so the home screen can tell the user up
+     * front that hands-free is unavailable, instead of offering an Arm button that
+     * silently never fires.
+     */
+    fun checkDetector() {
+        scope.launch {
+            val detector = SherpaWakeWordDetector(context)
+            val ready = detector.load()
+            repository.setDetectorReady(ready)
+            // Nothing is listening yet; the service builds its own instance when armed.
+            detector.close()
+
+            // The tagger is not required for hands-free activation, so its absence does
+            // not block arming — but knowing early whether it loaded is worth a probe.
+            val tagger = YamnetAudioTagger(context)
+            tagger.load()
+            tagger.close()
+        }
+    }
+
     /** Pushes current system permission state into the repository. */
     fun syncPermissions() {
         scope.launch {
@@ -75,9 +100,8 @@ class HandsFreeController(
             ListeningRequirement.MicrophonePermission -> requestMicrophone()
             ListeningRequirement.NotificationPermission -> requestNotifications()
             ListeningRequirement.BatteryExemption -> context.openBatterySettings()
-            // These are app state, not system state — the caller navigates instead.
-            ListeningRequirement.WakeWordEnrolled,
-            ListeningRequirement.VoiceProfile -> Unit
+            // App state, not system state — the caller navigates instead.
+            ListeningRequirement.WakeWordEnrolled -> Unit
         }
     }
 }
@@ -120,6 +144,8 @@ fun rememberHandsFreeController(repository: ListeningRepository): HandsFreeContr
     // this app to tell.
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, controller) {
+        // Model availability cannot change while the app runs, so it is checked once.
+        controller.checkDetector()
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) controller.syncPermissions()
         }

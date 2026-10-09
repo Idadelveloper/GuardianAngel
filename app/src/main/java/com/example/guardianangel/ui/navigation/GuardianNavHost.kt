@@ -202,6 +202,8 @@ private fun NavGraphBuilder.mainGraph(
                 contactsRepository = container.contactsRepository,
                 codewordRepository = container.codewordRepository,
                 listeningRepository = container.listeningRepository,
+                cloudSync = container.cloudSync,
+                currentUserId = { container.currentUserId() },
                 onOpenWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
                 onOpenCodewords = { navController.navigate(Routes.SETTINGS_CODEWORDS) },
                 onOpenGuardians = { navController.navigate(Routes.SETTINGS_GUARDIANS) },

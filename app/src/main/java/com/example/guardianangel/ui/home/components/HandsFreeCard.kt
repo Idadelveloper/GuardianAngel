@@ -187,9 +187,7 @@ private fun BlockerRow(
         ListeningRequirement.NotificationPermission ->
             "Notifications are off — Android needs one to listen" to "Allow"
         ListeningRequirement.WakeWordEnrolled ->
-            "No wake word recorded yet" to "Record"
-        ListeningRequirement.VoiceProfile ->
-            "Your voiceprint isn't set up" to "Set up"
+            "No wake word set yet" to "Choose one"
         ListeningRequirement.BatteryExemption ->
             "Battery optimisation may stop long sessions" to "Fix"
     }

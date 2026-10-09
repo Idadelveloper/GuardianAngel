@@ -32,9 +32,12 @@ import com.example.guardianangel.data.GuardianSamples
 import com.example.guardianangel.domain.model.AccountSnapshot
 import com.example.guardianangel.domain.model.Codeword
 import com.example.guardianangel.domain.model.EmergencyContact
+import com.example.guardianangel.domain.model.initialsOf
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
+import com.example.guardianangel.data.sync.CloudSync
+import com.example.guardianangel.data.sync.SyncStatus
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.ui.components.GuardianOutlinedButton
@@ -61,6 +64,8 @@ fun SettingsHubRoute(
     contactsRepository: ContactsRepository,
     codewordRepository: CodewordRepository,
     listeningRepository: ListeningRepository,
+    cloudSync: CloudSync,
+    currentUserId: suspend () -> String,
     onOpenWakeWord: () -> Unit,
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
@@ -77,12 +82,16 @@ fun SettingsHubRoute(
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val wakeWord by listeningRepository.observeWakeWord()
         .collectAsStateWithLifecycle(initialValue = null)
+    val syncStatus by cloudSync.status
+        .collectAsStateWithLifecycle(initialValue = SyncStatus.Idle)
 
     SettingsHubScreen(
         account = account,
         contacts = contacts,
         codewords = codewords,
         wakeWord = wakeWord,
+        syncStatus = syncStatus,
+        onBackUp = { scope.launch { cloudSync.push(currentUserId()) } },
         onOpenWakeWord = onOpenWakeWord,
         onOpenCodewords = onOpenCodewords,
         onOpenGuardians = onOpenGuardians,
@@ -103,6 +112,8 @@ fun SettingsHubScreen(
     contacts: List<EmergencyContact>,
     codewords: List<Codeword>,
     wakeWord: WakeWord?,
+    syncStatus: SyncStatus,
+    onBackUp: () -> Unit,
     onOpenWakeWord: () -> Unit,
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
@@ -110,6 +121,17 @@ fun SettingsHubScreen(
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Says what will actually happen, including that it cannot happen yet.
+    val cloudSubtitle = when (val status = syncStatus) {
+        SyncStatus.Unavailable ->
+            "Not set up — your data stays on this phone"
+        SyncStatus.Idle -> "Keep your setup if you change phones"
+        SyncStatus.Running -> "Backing up…"
+        is SyncStatus.Succeeded ->
+            if (status.rows == 0) "Already up to date" else "Backed up ${status.rows} items"
+        is SyncStatus.Failed -> status.message
+    }
+
     GuardianTabScaffold(
         modifier = modifier,
         topBar = {
@@ -141,24 +163,17 @@ fun SettingsHubScreen(
                     .padding(GuardianTheme.spacing.lg),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                InitialsAvatar(
-                    initials = profile.fullName
-                        .split(' ')
-                        .take(2)
-                        .map { it.first().uppercaseChar() }
-                        .joinToString(""),
-                    size = 56.dp,
-                )
+                InitialsAvatar(initials = initialsOf(profile.fullName), size = 56.dp)
                 Spacer(Modifier.size(GuardianTheme.spacing.md))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = profile.fullName,
+                        text = profile.fullName.ifBlank { "Your account" },
                         style = GuardianTheme.type.headlineMd,
                         color = GuardianTheme.materialColors.onSurface,
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = profile.phoneNumber,
+                        text = profile.phoneNumber.ifBlank { "No number added yet" },
                         style = GuardianTheme.type.bodySm,
                         color = GuardianTheme.materialColors.onSurfaceVariant,
                     )
@@ -247,9 +262,20 @@ fun SettingsHubScreen(
                 onClick = { /* Not part of this build. */ },
             )
             SettingsRow(
+                icon = GuardianIcons.Broadcast,
+                title = "Back up to the cloud",
+                subtitle = cloudSubtitle,
+                trailing = {
+                    if (syncStatus is SyncStatus.Running) {
+                        TonalPill(text = "Syncing…")
+                    }
+                },
+                onClick = onBackUp,
+            )
+            SettingsRow(
                 icon = GuardianIcons.Lock,
                 title = "Privacy & encryption",
-                subtitle = "On-device processing · nothing uploaded",
+                subtitle = "On-device processing · transcripts never leave this phone",
                 onClick = { /* Not part of this build. */ },
             )
         }
@@ -338,7 +364,9 @@ private fun SettingsHubPreview() {
             account = null,
             contacts = GuardianSamples.contacts,
             codewords = GuardianSamples.codewords,
-            wakeWord = WakeWord(phrase = "hey angel", enrolmentTakes = 3),
+            wakeWord = WakeWord(phrase = "hey angel", voiceSamples = 3),
+            syncStatus = SyncStatus.Unavailable,
+            onBackUp = {},
             onOpenWakeWord = {},
             onOpenCodewords = {}, onOpenGuardians = {}, onOpenVoice = {}, onSignOut = {},
         )

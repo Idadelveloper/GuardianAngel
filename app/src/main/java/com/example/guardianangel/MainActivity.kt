@@ -6,10 +6,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import com.example.guardianangel.di.AppContainer
-import com.example.guardianangel.di.InMemoryAppContainer
 import com.example.guardianangel.ui.navigation.GuardianNavHost
 import com.example.guardianangel.ui.theme.GuardianAngelTheme
 
@@ -26,17 +25,16 @@ class MainActivity : ComponentActivity() {
 /**
  * App root.
  *
- * The one place the object graph is built and the theme installed. Swapping
- * [InMemoryAppContainer] for a persistence-backed container is the only change needed
- * when the database lands — no screen or view model knows which it is talking to.
+ * The container is created by [GuardianAngelApplication] rather than here, so the
+ * listening service shares it — a wake word detected with the app closed has to update
+ * the same state this screen will read when it reopens.
  *
- * @param startAtOnboarding set true to exercise the setup wizard; the in-memory container
- *   otherwise starts signed in so the main shell is reachable immediately.
+ * @param startAtOnboarding set true to exercise the setup wizard.
  */
 @Composable
 fun GuardianAngelApp(
     startAtOnboarding: Boolean = false,
-    container: AppContainer = remember { InMemoryAppContainer(startSignedIn = !startAtOnboarding) },
+    container: AppContainer = LocalContext.current.appContainer,
 ) {
     GuardianAngelTheme {
         GuardianNavHost(

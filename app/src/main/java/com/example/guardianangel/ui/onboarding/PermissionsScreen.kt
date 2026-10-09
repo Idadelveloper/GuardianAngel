@@ -7,7 +7,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import android.Manifest.permission.ACCESS_FINE_LOCATION
+import android.Manifest.permission.POST_NOTIFICATIONS
+import android.Manifest.permission.RECORD_AUDIO
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.tooling.preview.Preview
 import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.ListeningRepository
@@ -62,18 +76,64 @@ fun PermissionsScreen(
     onGrant: (location: Boolean, microphone: Boolean, notifications: Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var location by remember { mutableStateOf(false) }
-    var microphone by remember { mutableStateOf(false) }
-    var notifications by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+
+    // Reflects what the system actually grants, re-read on resume. A local boolean
+    // would keep claiming a permission the user revoked in Settings, and this screen
+    // exists precisely to tell her the truth about what Angel can do.
+    var location by remember { mutableStateOf(context.hasPermission(ACCESS_FINE_LOCATION)) }
+    var microphone by remember { mutableStateOf(context.hasPermission(RECORD_AUDIO)) }
+    var notifications by remember { mutableStateOf(context.hasNotificationPermission()) }
+
+    fun refresh() {
+        location = context.hasPermission(ACCESS_FINE_LOCATION)
+        microphone = context.hasPermission(RECORD_AUDIO)
+        notifications = context.hasNotificationPermission()
+    }
+
+    val requestPermissions = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { refresh() }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner) {
+        // Catches the case where the user granted from system settings after being
+        // sent there by a permanent denial.
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+    }
+
+    /** Asks for anything still missing. Android ignores already-granted entries. */
+    fun request() {
+        val wanted = buildList {
+            if (!microphone) add(RECORD_AUDIO)
+            if (!location) add(ACCESS_FINE_LOCATION)
+            if (!notifications && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(POST_NOTIFICATIONS)
+            }
+        }
+        if (wanted.isEmpty()) refresh() else requestPermissions.launch(wanted.toTypedArray())
+    }
 
     GuardianWizardScaffold(
         modifier = modifier,
         stepLabel = "Step 1 of 5 · Permissions",
         progress = 0.2f,
         onBack = onBack,
-        ctaLabel = "Grant permissions & continue",
-        onCta = { onGrant(location, microphone, notifications) },
-        ctaEnabled = location && microphone && notifications,
+        ctaLabel = if (microphone && notifications) "Continue" else "Grant permissions",
+        onCta = {
+            if (microphone && notifications) {
+                onGrant(location, microphone, notifications)
+            } else {
+                request()
+            }
+        },
+        // Location is genuinely optional — Angel can still listen and record without
+        // it, she just cannot tell guardians where to go. Blocking setup on it would
+        // turn a degraded feature into no app at all.
+        ctaEnabled = true,
     ) {
         AngelSays(
             message = "To watch your route and listen for your codewords, I need two " +
@@ -87,7 +147,7 @@ fun PermissionsScreen(
             description = "Lets me check street lighting on your route and know when " +
                 "you've reached a safe haven.",
             checked = location,
-            onCheckedChange = { location = it },
+            onCheckedChange = { request() },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -97,7 +157,7 @@ fun PermissionsScreen(
             description = "Lets me listen for your wake word. Matching happens on your " +
                 "phone and nothing is recorded until you wake me.",
             checked = microphone,
-            onCheckedChange = { microphone = it },
+            onCheckedChange = { request() },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -107,7 +167,7 @@ fun PermissionsScreen(
             description = "Android requires a visible notification whenever an app holds " +
                 "the microphone in the background. Without it I can't listen hands-free.",
             checked = notifications,
-            onCheckedChange = { notifications = it },
+            onCheckedChange = { request() },
             modifier = Modifier.fillMaxWidth(),
         )
 
@@ -133,3 +193,14 @@ fun PermissionsScreen(
 private fun PermissionsPreview() {
     GuardianAngelTheme { PermissionsScreen(onBack = {}, onGrant = { _, _, _ -> }) }
 }
+
+private fun Context.hasPermission(permission: String): Boolean =
+    ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
+
+/** Notifications only became a runtime permission in Android 13. */
+private fun Context.hasNotificationPermission(): Boolean =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        hasPermission(POST_NOTIFICATIONS)
+    } else {
+        true
+    }

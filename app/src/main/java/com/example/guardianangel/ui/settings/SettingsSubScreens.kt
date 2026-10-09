@@ -52,6 +52,7 @@ import com.example.guardianangel.ui.home.components.TonalPill
 import com.example.guardianangel.ui.icons.GuardianIcons
 import com.example.guardianangel.ui.onboarding.AssuranceCard
 import com.example.guardianangel.ui.onboarding.ChipRow
+import com.example.guardianangel.ui.onboarding.rememberContactPicker
 import com.example.guardianangel.ui.onboarding.GuardianSwitch
 import com.example.guardianangel.ui.onboarding.TIER_COPY
 import com.example.guardianangel.ui.onboarding.levelFor
@@ -289,6 +290,12 @@ fun SettingsGuardiansScreen(
     var phone by remember { mutableStateOf("") }
     var relationship by remember { mutableStateOf(RELATIONSHIPS.first()) }
 
+    val pickContact = rememberContactPicker { picked ->
+        name = picked.name
+        phone = picked.phoneNumber
+        showForm = true
+    }
+
     GuardianStackScaffold(title = "Your guardians", onBack = onBack, modifier = modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -347,6 +354,13 @@ fun SettingsGuardiansScreen(
         if (showForm && contacts.size < MAX_GUARDIANS) {
             GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
                 SectionHeader(title = "Add a guardian", icon = GuardianIcons.Plus)
+                Spacer(Modifier.height(GuardianTheme.spacing.md))
+                GuardianOutlinedButton(
+                    text = "Choose from contacts",
+                    onClick = pickContact,
+                    leadingIcon = GuardianIcons.Users,
+                    modifier = Modifier.fillMaxWidth(),
+                )
                 Spacer(Modifier.height(GuardianTheme.spacing.md))
                 GuardianTextField(
                     value = name,

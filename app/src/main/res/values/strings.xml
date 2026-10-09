@@ -132,4 +132,6 @@
     <string name="listening_notification_title">Angel is listening</string>
     <string name="listening_notification_body">Say your wake word and I\'ll start recording.</string>
     <string name="listening_notification_stop">Stand down</string>
+    <string name="recording_notification_title">Angel is recording</string>
+    <string name="recording_notification_body">Listening for your codewords. Tap to stop.</string>
 </resources>
