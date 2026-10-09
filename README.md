@@ -4,16 +4,21 @@ An Android safety companion for women who find themselves alone and uneasy — w
 at night, meeting a stranger for the first time, stuck in a group that has started to
 feel wrong.
 
-Guardian Angel listens for a **codeword**. Say it, and the app quietly starts recording
-and transcribing, works out from the conversation whether the situation is actually
-escalating, and — only if it is — alerts the people you chose and shares your location.
+Guardian Angel listens for your **wake word**. Say it, and the app quietly starts
+recording and transcribing, works out from the conversation whether the situation is
+actually escalating, and — only if it is — alerts the people you chose and shares your
+location. Your **codewords**, said while it is already recording, tell it what to do.
 No fumbling for a phone, no obvious panic button, no sound.
 
-> **Status:** the full interface is built and navigable — Angel, four tabs, the setup
-> wizard and every sub-screen, running on sample data. What is *not* built is everything
-> behind it: the wake-word model itself, speech recognition, the escalation model,
-> persistence, real maps and live location. Treat it as a working prototype of the experience, not of the system. See
-> [Roadmap](#roadmap).
+> **Status:** the interface is complete and navigable — Angel, four tabs, the setup
+> wizard and every sub-screen. Hands-free activation **works on device**: the wake word
+> starts a recording, the voiceprint can gate it to your voice, and the recording is
+> transcribed, tagged and diarized locally. Storage and accounts are real (Room, twelve
+> tables, encrypted secrets).
+>
+> Still outstanding: tier-3 LLM reasoning for ambiguous situations, Room-backed session
+> history, a real map and live location, and threshold tuning against real speech — which
+> only testing in real rooms can settle. See [Roadmap](#roadmap).
 
 ---
 
@@ -134,7 +139,7 @@ worse than no feature at all.
 
 ### Recording & transcription
 
-When a codeword fires, the app records, transcribes, and attributes speech to separate
+When the wake word fires, the app records, transcribes, and attributes speech to separate
 voices (yours is enrolled during setup). It flags danger signals in the transcript —
 repeated refusals, raised voices, sounds that imply a struggle — and uses them, together
 with location and time of day, to decide whether to escalate.
@@ -189,7 +194,8 @@ an empty circle would make every other feature pointless.
 
 ## Screens
 
-Four tabs, a setup wizard, and three stacked sub-screens.
+Four tabs, a six-page setup wizard, and five stacked sub-screens — a session detail view
+plus wake word, codewords, guardians and voice calibration.
 
 ### Home
 
@@ -234,20 +240,27 @@ which tab holds which half of the same subject.
 ### Settings
 
 Profile, a word from Angel, then the safeguard list. Each row reports live state in its
-subtitle, so the whole setup is auditable without opening anything. Three sub-screens
-manage codewords, guardians, and voice sensitivity.
+subtitle, so the whole setup is auditable without opening anything. Four sub-screens
+manage the wake word, codewords, guardians and voice calibration.
 
 ### Onboarding
 
-Sign up → permissions → voice → guardians → codewords. Each step is a wizard page with a
-pinned call to action and Angel explaining what she needs and why.
+Sign up → permissions → voice → guardians → **wake word** → codewords. Each step is a
+wizard page with a pinned call to action and Angel explaining what she needs and why.
+
+**Every step is skippable**, and the skip link says what skipping costs rather than a
+neutral "later" — "Skip — no hands-free for now" instead of "Skip". Whatever is skipped
+resurfaces on Home as a **Not set up yet** card, because a skipped step otherwise leaves
+the app silently unable to do part of its job.
 
 Two places where the reference was simplified deliberately:
 
 - **Voice calibration** carried a countdown, a progress bar, three telemetry chips and
   two transport controls at once. During setup that reads as a studio console; it is now
-  one prompt, one button, one progress ring, with clarity chips appearing only once there
-  is something real to report.
+  one prompt, one button, one progress ring. The clarity figure is real — it is how well
+  the recorded segments agreed with each other — so a noisy room reports a low number
+  rather than a reassuring one, and says plainly that voice matching will stay off until
+  it improves.
 - **Codewords** put all four tiers plus a PIN section on one page. That is a lot of
   consequence to absorb at once and the tiers only make sense in order, so they are
   paginated — one word, one explanation, and an example built from what you just typed.
@@ -292,13 +305,25 @@ domain/
                             SafeRoute, AccountSnapshot … plain Kotlin, no Android types
   repository/               one interface per feature area
 data/
-  Fake*Repository           in-memory stand-ins, same shapes the real sources will emit
+  local/                    Room — entities, DAOs, Room*Repository implementations
+  auth/                     anonymous, email/password and phone, Firebase or local
+  crypto/                   KeystoreCrypto — AES-GCM for the voiceprint and PIN
+  platform/                 Android implementations of domain interfaces
+  sync/                     CloudSync — opt-in backup that cannot upload transcripts
+  Fake*Repository           in-memory stand-ins, same shapes the real sources emit
   *Samples                  sample content shared by the fakes and every @Preview
 audio/
-  AudioFeatures             log-mel + FFT front end, shared by any keyword model
-  KeywordSpotter            the model seam; LiteRT and stub implementations
-  WakeWordEngine            capture, sliding windows, matching, refractory period
+  SpeechPipeline            the interfaces every tier implements, and the rationale
+  AudioFeatures             log-mel + FFT front end, cosine similarity
+  SentencePieceTokenizer    typed phrase → tokens, Viterbi over the model vocabulary
+  SherpaWakeWordDetector    keyword spotting
+  SherpaTranscriber         Silero VAD + Moonshine Tiny
+  SherpaSpeakerIdentifier   CAM++ voiceprint — verification and diarization
+  VoiceEnroller             records audio, folds a running mean, reports clarity
+  YamnetAudioTagger         521 AudioSet classes via LiteRT
+  HeuristicThreatAssessor   the cheap reasoning tier
 service/
+  GuardianAudioSession      one AudioRecord, routed by phase
   GuardianListeningService  the microphone foreground service
 ui/
   theme/                    colour schemes, type scale, shapes, spacing, elevation,
@@ -333,16 +358,23 @@ Repositories are split by feature area rather than one god-object, so each can m
 independently when the database lands — contacts and codewords might move to an
 encrypted Room table first while analytics stays derived.
 
-| Repository | Owns | Likely storage |
+| Repository | Owns | Storage |
 |---|---|---|
-| `AccountRepository` | profile, onboarding progress, voice profile, disarm PIN | **Room + keystore** (done) |
+| `AccountRepository` | profile, onboarding progress, disarm PIN | **Room + keystore** (done) |
+| `VoiceProfileRepository` | the voiceprint and its clarity | **Room, Keystore-encrypted** (done) |
 | `ContactsRepository` | the trusted circle | **Room** (done) |
 | `CodewordRepository` | the four tiers and their phrases | **Room** (done) |
-| `ActivityRepository` | sessions, transcript lines, analytics rollups | Room; analytics as a query |
-| `RouteRepository` | destinations and route planning | Room + routing service |
-| `ListeningRepository` | wake word, enrolment, sensitivity, permission state | **Room** (done) |
+| `ListeningRepository` | wake word, enrolment count, sensitivity | **Room** (done) |
 | `AuthRepository` | who is signed in, and how | **Firebase, or local** (done) |
-| `GuardianRepository` | the live snapshot the home screen renders | composed from the above + sensors |
+| `PermissionProbe` | what the system currently grants | **the system itself** — never cached |
+| `ActivityRepository` | sessions, transcript lines, analytics rollups | *pending* — Room; analytics as a query |
+| `RouteRepository` | destinations and route planning | *pending* — Room + routing service |
+| `GuardianRepository` | the live snapshot the home screen renders | *pending* — composed from the above + sensors |
+
+The three pending rows are still in-memory fakes, so the Home snapshot is sample content.
+That is why the **Not set up yet** card reads codewords and guardians from their own Room
+repositories rather than from the snapshot — a setup card built on samples would reassure
+the user about things she has not actually set up.
 
 Secrets are represented by their *status*, never their value: `VoiceProfile` carries a
 clarity score rather than the voiceprint, and `DisarmPin` carries only whether a PIN is
@@ -363,11 +395,11 @@ it is worth it**. Full research, benchmarks and sources: **[docs/SPEECH_STACK.md
 
 | Tier | Runs | Job | Budget |
 |---|---|---|---|
-| 0 · VAD | always | Is anyone speaking? | ~1 MB, negligible |
-| 1 · Wake word | while armed | Should I start recording? | 5 MB int8, few ms/window |
-| 2a · Streaming ASR | while recording | What is being said | 119 MB, RTF ≈ 0.05 |
-| 2b · Audio tagging | while recording | Scream, glass, raised voices | ~4 MB |
-| 2c · Diarization | while recording | How many voices, whose | ~8 MB |
+| 0 · VAD | always | Is anyone speaking? | 632 KB, negligible |
+| 1 · Wake word | while armed | Should I start recording? | 13 MB fp32, few ms/window |
+| 2a · Streaming ASR | while recording | What is being said | 118 MB, RTF ≈ 0.05 |
+| 2b · Audio tagging | while recording | Scream, glass, raised voices | 3.9 MB |
+| 2c · Speaker ID | while recording | How many voices, whose | 28 MB |
 | 3 · Reasoning | on suspicion only | Is this escalating? | heuristic always, LLM rarely |
 
 **Do we need an LLM?** For detection, no — and using one would make the app worse. An
@@ -396,26 +428,41 @@ after-the-fact re-transcription of a saved session.
 
 ### What is built, and what you need to supply
 
-Built: every seam — `SpeechTranscriber`, `AudioTagger`, `ThreatAssessor`,
-`SituationSnapshot`; the mel/FFT front end; `KeywordSpotter` with a LiteRT
-implementation; the wake-word engine; the microphone foreground service; and
-`HeuristicThreatAssessor` with tests pinning both failure modes — staying quiet when
-something is happening, and crying wolf when nothing is.
+Tiers 0–2c run end to end on device. One `AudioRecord` feeds the wake-word spotter while
+waiting, and a detection flips the same stream into the transcriber, audio tagger and
+speaker identifier.
 
 The wake word runs on **sherpa-onnx keyword spotting** — Apache-2.0, 3.3 M parameters,
-open vocabulary, so any phrase registers at runtime with no retraining. `BpeTokenizer`
-turns a typed phrase into the tokens it expects. Phrase detection and speaker identity
-stay independent: the spotter decides *the phrase was said*, the CAM++ voiceprint decides
-*she said it*.
+open vocabulary, so any phrase registers at runtime with no retraining.
+`SentencePieceTokenizer` turns a typed phrase into the tokens it expects, and a phrase the
+model cannot pronounce is refused *before* it is saved rather than saving fine, looking
+set up, and never firing. Phrase detection and speaker identity stay independent: the
+spotter decides *the phrase was said*, the CAM++ voiceprint decides *she said it*.
 
-Tiers 0–2c run end to end on device: one `AudioRecord` feeds the wake-word spotter while
-waiting, and a detection flips the same stream into the transcriber, audio tagger and
-speaker identifier. Still pending: tier 3's LLM assessor for the ambiguous band,
-persistence, and tuning thresholds against real speech. APK is 234 MB with models
-bundled — fine for sideloading, over Play's ceiling. Checklist:
-**[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
+This is verified rather than assumed. Twenty instrumented tests run on a physical Pixel 7a
+and an emulator, feeding recorded speech through the real capture loop: detection fires,
+unrelated speech does not, the voice gate accepts its owner and rejects noise and silence,
+enrolment produces a usable voiceprint, re-arming after teardown works, and manual
+recording works with no wake word set. Writing those tests is what found three bugs that
+every component-level test had passed over — a tokeniser that made detection impossible,
+an embedding-length mismatch that would have rejected the enrolled user on every wake, and
+a native use-after-free on the disarm path.
 
-### Tech### Tech
+Two design rules fell out of that work and are worth stating:
+
+- **The voice-match toggle is a request, not the outcome.** The gate engages only when the
+  voiceprint is consistent enough to trust, because gating on a bad voiceprint does not
+  keep a stranger out — it stops Angel waking for the person she belongs to.
+- **Every speaker embedding comes from one fixed 1.5 s window.** CAM++ embeddings are only
+  comparable between inputs of similar duration; the same speech at 1 s versus 2 s scores
+  −0.03, as if two strangers.
+
+Still pending: tier 3's LLM assessor for the ambiguous band, Room-backed session history,
+and tuning thresholds against real speech — which no automated test can settle. The APK is
+240 MB with models bundled: fine for sideloading, over Play's 150 MB ceiling. Checklist of
+what only you can do: **[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
+
+### Tech
 
 Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
 Coroutines + Flow · ViewModel · LiteRT 1.4.2 · sherpa-onnx 1.13.8 ·
@@ -424,18 +471,42 @@ Coroutines + Flow · ViewModel · LiteRT 1.4.2 · sherpa-onnx 1.13.8 ·
 ## Building
 
 ```bash
-./gradlew :app:assembleDebug        # build
-./gradlew :app:testDebugUnitTest    # unit tests, including the contrast guard
-./gradlew :app:lintDebug            # lint, including accessibility checks
-./gradlew :app:installDebug         # install on a connected device
+./gradlew :app:assembleDebug              # build
+./gradlew :app:testDebugUnitTest          # 34 unit tests, including the contrast guard
+./gradlew :app:connectedDebugAndroidTest  # 20 instrumented tests, needs a device
+./gradlew :app:lintDebug                  # lint, including accessibility checks
+./gradlew :app:installDebug               # install on a connected device
 ```
 
-Seventeen `@Preview` functions across thirteen files cover every screen, including all
-three home states, both map states and the four onboarding steps.
+The instrumented suite is the one that matters for the audio path — it feeds recorded
+speech through the real capture loop and is the only suite that has ever caught a bug
+there. Run it for any change under `audio/` or `service/`.
+
+Twenty-one `@Preview` functions across seventeen files cover every screen, including all
+three home states, both map states and all five onboarding steps.
+
+### Working with AI coding agents
+
+**`AGENTS.md` in the repo root is the canonical context for every agent**, and the
+per-agent files are thin pointers to it on purpose:
+
+| Agent | Reads |
+|---|---|
+| OpenAI Codex | `AGENTS.md` directly |
+| JetBrains Junie | `AGENTS.md` + `.junie/playbook.md` |
+| Gemini CLI | `GEMINI.md`, which imports `AGENTS.md` with `@./AGENTS.md` |
+| Claude Code | `.claude/skills/guardian-angel-context/`, which points at `AGENTS.md` |
+
+Keep shared facts in `AGENTS.md` alone. An earlier per-agent file carried its own copy of
+the architecture notes, drifted, and ended up directing an agent at four source files that
+no longer existed while describing a tokeniser that had been replaced. One canonical file,
+many thin pointers.
 
 ---
 
 ## Roadmap
+
+### Interface
 
 - [x] Design system, theme and component library
 - [x] Angel mascot — five animated tiers driven by the safety score
@@ -443,49 +514,88 @@ three home states, both map states and the four onboarding steps.
 - [x] Home — sanctuary, out & about, and recording states
 - [x] Map — standby and safest-route comparison (stylised canvas)
 - [x] Activity — session log, diarized transcript, movement insights
-- [x] Settings — hub plus codewords, guardians and voice sub-screens
-- [x] Onboarding — account, permissions, voice, guardians, codewords
-- [x] Domain models and repository contracts for every feature area
+- [x] Settings — hub plus wake word, codewords, guardians and voice sub-screens
+- [x] Onboarding — account, permissions, voice, guardians, wake word, codewords
+- [x] Skippable onboarding, with a **Not set up yet** card on Home that resurfaces
+      whatever was skipped and names what it costs
 - [ ] **Localise the new screens.** The theme, navigation and original Home copy live in
-      `strings.xml`; copy added with the Angel screens is still inline in the composables
-      and needs a pass before any non-English build.
-- [x] Hands-free plumbing — mel/FFT front end, keyword-spotter seam, sliding-window
-      engine, microphone foreground service, permission flow and UI
+      `strings.xml` (102 strings); copy added with the Angel screens is still inline in
+      the composables and needs a pass before any non-English build.
+
+### Hands-free activation
+
+- [x] Microphone foreground service, permission flow and UI
+- [x] Permission state probed from the system, never cached, so a permission granted in
+      onboarding is never asked for again
 - [x] Speech-stack architecture — tiered pipeline, all seams, heuristic reasoning tier
 - [x] sherpa-onnx integrated; ASR, wake word, VAD and speaker models in place
-- [x] Wake word on sherpa KWS — Apache-2.0, open vocabulary, verified loading on device
-- [x] Wake word wired end to end — detection starts a recording session, proven on
-      device by feeding recorded speech through the real capture path
+- [x] Wake word on sherpa KWS — Apache-2.0, open vocabulary, phrases validated against
+      the model vocabulary before they can be saved
+- [x] Wake word wired end to end and **proven on device** — recorded speech through the
+      real capture path starts a recording; unrelated speech does not
+- [x] Speaker verification so only your voice wakes Angel — enrolment records real audio,
+      the voiceprint is CAM++ and encrypted at rest, and the gate engages only when the
+      voiceprint is consistent enough to trust
 - [x] YAMNet audio tagging — loading on device, danger classes mapped
 - [x] sherpa-backed transcriber (VAD + Moonshine) and speaker diarization
+- [x] Manual recording that depends on nothing but the microphone — no wake word, no
+      model, no notification permission
+- [x] Instrumented suite on a physical device and an emulator covering the whole path
+- [ ] Tune detection and speaker thresholds against real speech in real rooms
+- [ ] On-device codeword spotting against the live transcript
+- [ ] LLM-backed reasoning for the ambiguous 0.30–0.60 severity band
+- [ ] The accidental-trigger flow — the disarm PIN is modelled and stored, but the
+      cancel-and-stand-down journey is not built
 - [ ] APK size: move models to first-run download or Play Asset Delivery
-- [x] Speaker verification so only your voice wakes Angel — enrolment records real
-      audio, the voiceprint is CAM++ and encrypted at rest, and the gate engages only
-      when the voiceprint is consistent enough to trust
-- [ ] LLM-backed reasoning for the ambiguous severity band
+
+### Data
+
 - [x] Room database — twelve tables, exported schemas, Keystore-encrypted secrets
 - [x] Anonymous accounts, with email/password and phone linking ready for Firebase
 - [x] Opt-in cloud backup that cannot upload transcripts
 - [x] Contact picker, and real runtime permission requests in onboarding
+- [x] Domain models and repository contracts for every feature area
 - [ ] Room-back the remaining repositories (sessions, analytics, routes) — the home
       snapshot is still sample content, which is why the setup card reads live state
       from the repositories that are real rather than from the snapshot
 - [ ] SQLCipher for the whole database, not just the credential columns
-- [ ] Real Maps SDK behind `RouteCanvas`, plus live location
-- [ ] Speech recognition, diarisation and on-device codeword spotting
-- [ ] AI escalation model over the live transcript
-- [ ] Real safety-score model over public crime data
-- [ ] Background service, notifications and the accidental-trigger flow
 - [ ] Transcript export, annotation and deletion
+
+### Still to come
+
+- [ ] Real Maps SDK behind `RouteCanvas`, plus live location
+- [ ] Real safety-score model over public crime data
 - [ ] Wearable companion
 
 ## Privacy
 
 This app records audio and tracks location — the two most sensitive permissions a phone
-can grant. The intended design: recording only after an explicit trigger, transcripts
-encrypted at rest, the user able to delete any transcript permanently, demographic factors
-opt-in and off by default, and location shared only with contacts the user named and only
-while an alert is live.
+can grant. So it is worth being precise about what the current build actually does, rather
+than describing an intention.
 
-None of that is implemented yet. Treat the current build as a UI prototype and do not put
-real personal data into it.
+**True today:**
+
+- **Nothing is recorded until you trigger it.** While armed, roughly a second and a half
+  of audio is held in a fixed buffer and continuously overwritten so the wake word can be
+  matched against it. It is never written to disk.
+- **Audio never leaves the device.** All six tiers run locally. `CloudSync` has no code
+  path that reads the transcript tables, and its payloads are hand-written maps so a new
+  column cannot start syncing by accident.
+- **The voiceprint is a vector, not a recording**, is encrypted with a hardware-backed
+  Keystore key, and is never uploaded. The audio it was derived from is discarded as soon
+  as the vector exists.
+- **The disarm PIN is hashed and Keystore-encrypted**, never stored in the clear.
+- **Demographic factors are opt-in and off by default.** They are never inferred.
+- **Cloud backup is opt-in** and covers guardians, codewords, safe places and session
+  metadata only.
+
+**Not true yet** — do not rely on these:
+
+- **Transcript text is stored unencrypted** in Room. Only the voiceprint and the PIN are
+  encrypted; whole-database encryption (SQLCipher) is on the roadmap.
+- **There is no way to delete an individual transcript** from the UI yet.
+- **Location is not wired.** The safety score and session breadcrumbs use placeholder
+  values, so nothing real is shared with anyone.
+
+Treat this as a build under active development: the privacy architecture is real, but it
+is not finished, and you should not put sensitive personal data into it yet.

@@ -1,272 +1,81 @@
 ---
 name: guardian-angel-context
-description: Product, design-system and architecture context for the Guardian Angel women's-safety Android app. Load before building or changing any screen, component, colour, type style or data model in this repo, and before answering questions about what the app does, its codeword tiers, safety score, or UI conventions.
+description: Product, design-system, audio-stack and architecture context for the Guardian Angel women's-safety Android app. Load before building or changing any screen, component, colour, type style, data model or audio stage in this repo, and before answering questions about what the app does, its wake word and codeword tiers, voice enrolment, safety score or UI conventions.
 ---
 
 # Guardian Angel — working context
 
-A women's-safety Android app. A spoken **codeword** makes the app record, transcribe and
-evaluate the situation, then alert chosen contacts with the user's location if things are
-genuinely escalating. Target users: women 18+ in the US, alone and uneasy.
+A women's-safety Android app in Kotlin and Compose. A spoken **wake word** starts an
+on-device recording that is transcribed and interpreted; guardians are alerted with the
+user's location if things are genuinely escalating. Target users: women 18+, alone and
+uneasy.
 
-Read `README.md` for the full product description. This file is the working context you
-need before touching code.
+## Read `AGENTS.md` first
 
-## Three constraints that decide arguments
+**`AGENTS.md` in the repo root is the canonical context, shared by every coding agent on
+this project** (Claude Code, Codex, Gemini CLI, Junie). Read it before touching code. It
+carries:
 
-1. **Discreet.** Help arrives without visibly asking for it. No sounds, no flashes, no
-   obvious panic button. If a change makes activation more conspicuous, it is wrong.
-2. **Tolerant of mistakes.** Codewords are ordinary words and will be said by accident.
-   Escalation is always cancellable, stopping is always one tap with no confirm dialog.
-3. **Calm.** The user may already be frightened. Blush white and soft rose, never alarm
-   red as the default. Micro-interactions breathe; they never strobe — except Angel's
-   critical tier, where a strobe is the point.
+- the three product constraints that settle design arguments
+- the two kinds of spoken trigger, and why merging them is dangerous
+- what Android actually permits for background microphone access
+- **the invariants that were paid for in bugs** — the fixed embedding window, ordered
+  native teardown, probed-not-cached permissions, the voice gate degrading off, unigram
+  tokenisation, and stubs never faking success
+- the speech cascade, the audio package map, and the architecture seams
+- the design-system tokens, paired colours and accessibility floors
+- navigation shells, the mascot rules, the safety score
+- current state, what is next, and what only Ida can test
 
-When a decision is genuinely ambiguous, these three win over visual novelty.
+This skill deliberately does **not** restate those facts. An earlier version of this file
+did, drifted out of date, and ended up pointing at four files that no longer existed
+(`KeywordSpotter`, `LiteRtKeywordSpotter`, `StubKeywordSpotter`, `WakeWordEngine`) while
+describing a tokeniser that had been replaced. One canonical file, many thin pointers.
 
-## Two kinds of spoken trigger — do not conflate these
+If you learn something durable about this codebase, add it to `AGENTS.md`, not here.
 
-**Wake word** (`WakeWord`, `ListeningRepository`): one phrase, said while Angel is on
-standby. Wakes her and *starts* recording. Matched by an always-on keyword model with a
-hard battery budget. Set in onboarding step 4 and Settings → Wake word.
+Deeper references: `README.md` (product), `docs/SPEECH_STACK.md` (model choices and
+benchmarks), `docs/DATA_AND_AUTH.md` (storage and auth).
 
-**Codewords** (`Codeword`, `CodewordRepository`): four phrases, said while she is
-*already* recording, choosing what she does next. Matched against the transcript, which
-only exists once recording started. Onboarding step 5 and Settings → Codewords.
+## Claude-specific working notes
 
-Separate types, separate repositories, separate screens — on purpose. A user who thinks
-her danger codeword wakes the app would say it into a phone that is not listening. Never
-merge them, and never let one screen offer both.
-
-## What Android allows for hands-free listening
-
-Load-bearing platform facts; do not design around wishes:
-
-- `RECORD_AUDIO` is while-in-use. Background listening needs a `microphone` foreground
-  service plus `FOREGROUND_SERVICE_MICROPHONE` (Android 14+).
-- **The service cannot be started from the background** — not on boot, not from a
-  broadcast. `ForegroundServiceStartNotAllowedException`. Angel cannot arm herself; the
-  user arms her from a visible screen.
-- Once started legally it *does* keep capturing with the app closed and screen locked.
-- A persistent notification is mandatory.
-- `AlwaysOnHotwordDetector` / SoundTrigger is default-assistant only. Not available.
-
-`HandsFreeController` is the only place that touches permission and service APIs. It
-re-reads permissions on every `ON_RESUME` because the user can revoke them from Settings
-while backgrounded — showing "listening" over a revoked mic is the worst lie this app
-could tell.
-
-## The speech stack is a cascade — keep it that way
-
-Four tiers; each runs only when the one below says it is worth it. Full rationale and
-benchmarks: `docs/SPEECH_STACK.md`.
-
-```
-0 VAD              always        is anyone speaking
-1 wake word        armed         should I start recording
-2a streaming ASR   recording     what is being said        (sherpa-onnx + Moonshine Tiny)
-2b audio tagging   recording     scream / glass / shouting (YAMNet via LiteRT)
-2c diarization     recording     how many voices, whose
-3 reasoning        on suspicion  is this escalating
-```
-
-**Never put a language model on the hot path.** On-device LLM = 2–5 s to first token and
-~1.2 GB RAM; an MFCC+SVM distress classifier gets ~95%/1% FA for 3–5% battery per 10 h.
-`HeuristicThreatAssessor` runs on every chunk and must stay instant and auditable — its
-severity breakdown is what the user reads back after an alert. An LLM is only for the
-ambiguous 0.30–0.60 band, over **text**, never over audio.
-
-Escalation requires **two or more** corroborating signals. One weak signal must never be
-able to call someone's emergency contacts. `HeuristicThreatAssessorTest` pins both
-failure modes; if you retune weights, that test is the contract.
-
-Cloud ASR is better and cheaper and we still do not use it on the live path — audio never
-leaving the device is the product promise, and connectivity fails where she needs it most.
-
-## The audio stack
-
-```
-audio/AudioFeatures      log-mel + FFT front end (no deps; parameters matter)
-audio/KeywordSpotter     the model seam + KeywordTemplate/buildTemplate
-audio/LiteRtKeywordSpotter   LiteRT (com.google.ai.edge.litert), model from assets/
-audio/StubKeywordSpotter     used when no model is installed
-audio/WakeWordEngine     capture, overlapping windows, matching, refractory period
-service/GuardianListeningService   the microphone FGS
-```
-
-Wake word runs on **sherpa-onnx KWS** (`SherpaWakeWordDetector`), not the embedding
-path — Apache-2.0, 3.3 M params, open vocabulary via `KeywordSpotter.createStream`.
-`BpeTokenizer` converts a typed phrase to tokens; it is greedy longest-match, matching
-upstream on 7 of 9 reference phrases, so prefer `BpeTokenizer.CURATED_PHRASES` in UI.
-Speaker identity is a *separate* check (CAM++ voiceprint), not part of the spotter.
-
-The LiteRT embedding path (`KeywordSpotter`/`StubKeywordSpotter`) is retained as the
-alternative. Its stub **never reports a match**; keep it that way. A fake detector that fired on a timer would
-make hands-free look like it worked, which for a safety app is dangerous to demo. When
-the detector is unavailable the UI must say so, never offer an Arm button that arms into
-silence.
-
-LiteRT is pinned to **1.4.2**: the 2.x Kotlin API is compiled with Kotlin 2.4 metadata
-and this project is on 2.2.10. 1.4.2 exposes the stable `org.tensorflow.lite.Interpreter`.
-
-## Codeword tiers
-
-`CodewordTier`: `Safe` (cancel false alarm) → `Caution` (transcribe silently, notify
-nobody) → `Danger` (alert circle + location) → `Emergency` (call 911 + alert circle).
-Always present them in that order; the grid sorts by `CodewordTier.entries`, not by
-whatever the data layer returns.
-
-## Home screen states
-
-One `GuardianMode` drives all three: `Standby` (mic dormant, quiet surface) ·
-`Listening` (armed, warm gradient hero + telemetry) · `Recording` (panel expands at top
-with timer, waveform, transcript, who was alerted, and a full-width Stop button).
-
-The duress trigger is a **3-second hold**; stopping is an immediate tap. Do not make
-these symmetrical — arming is deliberate, standing down is not.
-
-## Safety score
-
-A probability estimate from public crime data + time of day + distance from safe base +
-safe nodes + lighting. Lead with the band and a one-line rationale; the percentage is
-secondary and every factor is listed. Never present it as a guarantee.
-
-Demographic factors (race, age) are **opt-in and off by default**. Do not add them to the
-defaults, and do not infer them.
-
-## Angel (the mascot)
-
-`ui/mascot/` — a Compose-canvas mascot with five tiers: `Resting`, `Sanctuary`,
-`Cautious`, `Warning`, `Critical`. Never add a sixth without updating `AngelStyles.kt`,
-which declares all five side by side.
-
-Derive mood only through `AngelMood.fromScore(score, atSafeHaven, isArmed, inDuress)` —
-never pick a mood by hand in a screen, or two surfaces will disagree about how worried
-Angel is. Angel is decorative by default; pass `contentDescription` only where she is the
-sole carrier of a message, which should be nowhere.
-
-## Navigation
-
-`ui/navigation/` — one `NavHost`, routes as constants in `Routes`, tabs in
-`TopLevelTab`. Three shells:
-
-- **Onboarding** slides horizontally, no bottom bar (it is a wizard — a tab bar invites
-  the user out of a flow that must complete in order).
-- **Main tabs** cross-fade (a slide implies hierarchy peers do not have).
-- **Stacked sub-screens** slide in from the right.
-
-The bottom bar lives in the NavHost, not in screens, so exactly one place decides when it
-is visible. Use `GuardianTabScaffold` / `GuardianStackScaffold` / `GuardianWizardScaffold`
-rather than hand-rolling insets — they own window insets, max content width and the
-floating-nav clearance.
-
-## Architecture
-
-```
-di/AppContainer            the object graph; the single swap point for persistence
-domain/model               plain Kotlin, no Android types
-domain/repository          one interface per feature area
-data/Fake*Repository       in-memory stand-ins + *Samples shared with @Preview
-ui/…                       theme, mascot, components, icons, navigation, feature packages
-```
-
-Screens read one snapshot and never touch a data source. Add a field to the domain model
-and surface it through the repository — do not reach around it. Put sample data in
-`*Samples`, never inline in a preview, so previews and the running app cannot drift.
-
-Secrets are modelled by *status*, not value (`VoiceProfile` has a clarity score, not the
-voiceprint). Keep it that way.
-
-## Design system — the rules that matter
-
-Theme lives in `ui/theme/`. Two accessors, no third:
-
-- `MaterialTheme.colorScheme` / `.typography` / `.shapes` for standard Material roles
-- `GuardianTheme.colors` / `.spacing` / `.shapes` / `.type` / `.windowSizeClass` for brand
-  tokens Material has no slot for
-
-**Never hard-code a hex value, dp spacing value, or font in a component.** If a token is
-missing, add it to the theme rather than inlining it.
-
-### Paired colours
-
-Accent tokens invert between light and dark. Always use the paired content colour:
-
-| Background | Content |
-|---|---|
-| `colors.accentSoft` | `colors.onAccentSoft` |
-| `colors.accentWarm` | `colors.onAccentWarm` |
-| `colors.activeContainer` | `colors.onActiveContainer` |
-| `colors.safeContainer` | `colors.onSafeContainer` |
-| `materialColors.primaryContainer` | `materialColors.onPrimaryContainer` |
-
-Borrowing an unrelated `on*` role is the single most likely bug here: it looks fine in
-light mode and renders at ~1.3:1 in dark. `ColorContrastTest` catches it — run
-`./gradlew :app:testDebugUnitTest` after any colour change.
-
-### Accessibility floors
-
-4.5:1 for text, 3:1 for any non-text element that carries meaning or identifies a
-control. Three design-document values fail these and have accessible siblings already —
-use `colors.focusRing` (not raw rose) for focus, `colors.borderControl` (not
-`borderDefault`/`borderEmphasis`) for control outlines, and `colors.iconMuted` (not
-espresso at 45%) for inactive nav icons. `borderDefault`/`borderEmphasis` are decorative
-dividers only.
-
-Colour is never the only signal — pair every status with a label and a distinct glyph.
-
-### Other conventions
-
-- Icons: `GuardianIcons`, stroke-based 24×24 with round caps. Add to that object rather
-  than pulling in Material's filled glyphs.
-- Shapes: `shapes.pill` for buttons/chips, `.lg` (16dp) cards, `.xl` (24dp) sheets and
-  hero cards, `.md` (12dp) inputs.
-- Standard buttons are 52dp; in-card pill actions are 44dp.
-- Elevation is ambient warm glow + tonal layering, via `guardianCardElevation`,
-  `guardianFloatingElevation`, `focalHalo`, `ambientGlow`. Not Material tonal elevation —
-  layering both double-tints the surface.
-- No dynamic colour. The palette is a safety signal; wallpaper must not repaint it.
-- Inside a vertically scrolling column, build grids from chunked `Row`s. A
-  `LazyVerticalGrid` nested in a same-orientation scroll will crash.
-- Window insets go **outside** the scroll modifier, or the padding scrolls away.
-
-## Architecture
-
-```
-domain/model       GuardianSnapshot and friends — no Android types
-domain/repository  GuardianRepository — the only seam to data
-data/              FakeGuardianRepository (in-memory) + GuardianSamples
-ui/home/           HomeScreen, HomeViewModel, components/
-```
-
-Screens read one `GuardianSnapshot` and never touch a data source. The repository is
-constructed once in `GuardianAngelApp`. When adding a field the UI needs, put it on the
-domain model and surface it through the snapshot — don't reach around the repository.
-
-`GuardianSamples` is shared by the fake repository and every `@Preview`, so previews and
-the running app can't drift. Add sample data there, not inline in a preview.
-
-## Known gotchas
-
-- Angel's infinite animations keep the window non-idle, so `uiautomator dump` and any
-  Espresso idling-resource wait will time out. Drive UI checks with coordinates and
-  screenshots, or stub the mascot in tests.
-- Copy added with the Angel screens is inline, not in `strings.xml` (tracked in the
-  README roadmap). New user-facing text should go to resources where practical.
-- `RouteCanvas` is a stylised stand-in for a real map — no Maps SDK key exists yet.
-- Models live in `app/src/main/assets/`; the debug APK is ~220 MB. ABI filters are set to
-  `arm64-v8a` + `x86_64` — do not re-add armeabi-v7a/x86 (57 MB for nobody). Extract
-  archives and delete `test_wavs/` before committing any new model.
-- The onboarding wizard is **5 steps** (permissions, voice, guardians, wake word,
-  codewords). Adding a step means renumbering every `stepLabel` and `progress`.
-
-## Verifying
+**Verify, do not assume.** This repo has repeatedly had bugs that every component-level
+test passed over:
 
 ```bash
 ./gradlew :app:assembleDebug
-./gradlew :app:testDebugUnitTest   # includes the WCAG contrast guard
+./gradlew :app:testDebugUnitTest          # 34 tests, includes the WCAG contrast guard
+./gradlew :app:connectedDebugAndroidTest  # 20 tests, needs a device
 ./gradlew :app:lintDebug
 ```
 
-Previews cover all three home states in light and dark. For visual checks prefer an
-emulator (`Pixel_8a_API_35`) over the user's physical device.
+Run the **instrumented** suite for any change under `audio/` or `service/`. It is the only
+suite that has ever caught a real bug there, and it has caught several: a tokeniser that
+made detection impossible, an embedding-length mismatch that would have rejected the
+enrolled user on every wake, and a native use-after-free on the disarm path.
+
+**Reading test results.** `connectedDebugAndroidTest` writes JUnit XML to
+`app/build/outputs/androidTest-results/connected/`; unit tests to
+`app/build/test-results/testDebugUnitTest/`. Parse the XML rather than scrolling Gradle
+output — per-device results are separate files, and a failure can be truncated in the
+console. **A failure with an empty message is usually a native crash**, not an assertion:
+check `adb logcat` for `F DEBUG` tombstone lines before theorising.
+
+**Measure before diagnosing.** Twice in this repo a plausible theory about model behaviour
+was wrong, and a throwaway instrumented test that logged actual cosine similarities
+settled it in one run. Write the diagnostic, read the numbers, then fix — and delete the
+diagnostic afterwards.
+
+**Devices.** Ida's physical Pixel 7a is `34041JEHN26942`; the emulator is
+`Pixel_8a_API_35` (`emulator-5554`). Prefer the emulator for anything that drives the UI:
+the Pixel has a secure lock screen and taps silently land on the lockscreen once it
+sleeps. Better still, prefer an instrumented test against a real repository over UI
+automation — driving the UI was tried here and mostly tested the emulator's keyboard. See
+the testing notes in `AGENTS.md` for the specific traps.
+
+**Scratchpad.** Use the session scratchpad directory for pulled databases, UI dumps and
+diagnostics, never the repo.
+
+**Ida's working preferences.** She wants genuine research and an honest comparison of
+alternatives before a tool or model choice, followed by an explicit list of actions she
+has to take herself. Say plainly which parts are verified and which are not.
