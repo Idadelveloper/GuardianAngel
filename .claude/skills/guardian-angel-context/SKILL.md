@@ -56,6 +56,33 @@ re-reads permissions on every `ON_RESUME` because the user can revoke them from 
 while backgrounded — showing "listening" over a revoked mic is the worst lie this app
 could tell.
 
+## The speech stack is a cascade — keep it that way
+
+Four tiers; each runs only when the one below says it is worth it. Full rationale and
+benchmarks: `docs/SPEECH_STACK.md`.
+
+```
+0 VAD              always        is anyone speaking
+1 wake word        armed         should I start recording
+2a streaming ASR   recording     what is being said        (sherpa-onnx + Moonshine Tiny)
+2b audio tagging   recording     scream / glass / shouting (YAMNet via LiteRT)
+2c diarization     recording     how many voices, whose
+3 reasoning        on suspicion  is this escalating
+```
+
+**Never put a language model on the hot path.** On-device LLM = 2–5 s to first token and
+~1.2 GB RAM; an MFCC+SVM distress classifier gets ~95%/1% FA for 3–5% battery per 10 h.
+`HeuristicThreatAssessor` runs on every chunk and must stay instant and auditable — its
+severity breakdown is what the user reads back after an alert. An LLM is only for the
+ambiguous 0.30–0.60 band, over **text**, never over audio.
+
+Escalation requires **two or more** corroborating signals. One weak signal must never be
+able to call someone's emergency contacts. `HeuristicThreatAssessorTest` pins both
+failure modes; if you retune weights, that test is the contract.
+
+Cloud ASR is better and cheaper and we still do not use it on the live path — audio never
+leaving the device is the product promise, and connectivity fails where she needs it most.
+
 ## The audio stack
 
 ```

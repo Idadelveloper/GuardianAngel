@@ -327,45 +327,61 @@ is the only change needed, and no screen or view model knows the difference.
 Reads are `Flow` because the data is genuinely live: the score re-evaluates as the user
 moves, contacts come online, and a session accumulates transcript lines while open.
 
-### The wake-word model
+### Speech stack
 
-Users pick their **own** wake phrase, which rules out the usual approach of training one
-fixed-vocabulary classifier and shipping it. The workable design for user-defined
-keywords is few-shot enrolment:
+Sound becomes a decision through **four tiers, each only running when the one below says
+it is worth it**. Full research, benchmarks and sources: **[docs/SPEECH_STACK.md](docs/SPEECH_STACK.md)**.
 
-1. A frozen speech-embedding model turns a ~1.5 s window into a small vector.
-2. At setup the user says her phrase three times; the vectors are averaged into a
-   template stored on device.
-3. At runtime every window is embedded and compared by cosine similarity; above a
-   threshold, Angel wakes.
+| Tier | Runs | Job | Budget |
+|---|---|---|---|
+| 0 · VAD | always | Is anyone speaking? | ~1 MB, negligible |
+| 1 · Wake word | while armed | Should I start recording? | ~1 MB, few ms/window |
+| 2a · Streaming ASR | while recording | What is being said | ~40 MB, RTF ≈ 0.05 |
+| 2b · Audio tagging | while recording | Scream, glass, raised voices | ~4 MB |
+| 2c · Diarization | while recording | How many voices, whose | ~8 MB |
+| 3 · Reasoning | on suspicion only | Is this escalating? | heuristic always, LLM rarely |
 
-Everything except step 1 is already built. `KeywordSpotter` is the seam:
-`LiteRtKeywordSpotter` runs a `.tflite` model from `assets/` through **LiteRT** (the
-successor runtime to TensorFlow Lite, `com.google.ai.edge.litert`), and
-`StubKeywordSpotter` stands in when no model is installed.
+**Do we need an LLM?** For detection, no — and using one would make the app worse. An
+MFCC+SVM distress classifier reaches ~95% detection at ~1% false alarm for 3–5% battery
+over ten hours; an on-device LLM costs 2–5 s to first token and ~1.2 GB of RAM. Running
+the expensive thing continuously would flatten the battery during exactly the walk home
+it exists to protect, and answer *slower*.
 
-**No model is committed to this repository.** The obvious candidate is the
-`speech_embedding` backbone that openWakeWord and several few-shot KWS papers build on —
-about 1 MB, a few milliseconds per window — but openWakeWord's *pre-trained* weights are
-CC BY-NC-SA 4.0, which is fine for a prototype and not fine for a shipped app. That is a
-licensing decision to make at integration time, not one to bake in here. Until a model is
-present the app says plainly that hands-free activation is unavailable rather than arming
-into silence.
+For **judgement** on the ambiguous middle — whether *"leave me alone"* plus a stranger's
+voice plus 11 pm plus an unlit street is escalation — yes. `HeuristicThreatAssessor` runs
+on every chunk and escalates when signals are unambiguous; a language model is invoked
+only in the 0.30–0.60 severity band, over text, never over audio.
 
-The stub deliberately **never** reports a match. A fake detector firing on a timer would
-make the hands-free path look like it worked, which for a safety app would be a genuinely
-dangerous thing to demo.
+**Chosen runtime: sherpa-onnx** (Apache-2.0) running **Moonshine Tiny**. It covers ASR,
+diarization, speaker ID, VAD, keyword spotting and audio tagging in one framework, which
+matters more for maintenance than any single model's WER — and the runtime choice is
+worth more than the model choice anyway: sherpa-onnx is reported 51× faster than
+whisper.cpp on the *same* Whisper Tiny on Android.
 
-Two further pieces are specified but not built: speaker verification (an ECAPA-TDNN-lite
-embedding compared against the voiceprint from the one-minute enrolment, so someone else
-saying your wake word does not start a recording — the toggle for it already exists), and
-transcript-side codeword matching once recording has started, which wants a small
-streaming ASR such as Vosk rather than a keyword model.
+**Cloud is better and we are still not using it** for the live path. AssemblyAI streams
+at 307 ms P50 / 8.14% WER for ~$0.21–0.46/hour — better than anything that fits on a
+phone. But the app's promise is that audio never leaves the device, connectivity fails
+exactly where she needs it most, and streaming someone's surroundings to a third party
+during an assault is a different threat model. Cloud is legitimate only as opt-in,
+after-the-fact re-transcription of a saved session.
 
-### Tech
+### What is built, and what you need to supply
+
+Built: every seam — `SpeechTranscriber`, `AudioTagger`, `ThreatAssessor`,
+`SituationSnapshot`; the mel/FFT front end; `KeywordSpotter` with a LiteRT
+implementation; the wake-word engine; the microphone foreground service; and
+`HeuristicThreatAssessor` with tests pinning both failure modes — staying quiet when
+something is happening, and crying wolf when nothing is.
+
+Pending, and needing a human: the model files, the wake-word licence decision, and
+testing on a device with a real microphone. The checklist is
+**[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
+
+### Tech### Tech
 
 Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
-Coroutines + Flow · ViewModel · LiteRT 1.4.2 · `minSdk` 24, `targetSdk` 37
+Coroutines + Flow · ViewModel · LiteRT 1.4.2 · sherpa-onnx (pending) ·
+`minSdk` 24, `targetSdk` 37
 
 ## Building
 
@@ -397,11 +413,12 @@ three home states, both map states and the four onboarding steps.
       and needs a pass before any non-English build.
 - [x] Hands-free plumbing — mel/FFT front end, keyword-spotter seam, sliding-window
       engine, microphone foreground service, permission flow and UI
-- [ ] **Drop in a wake-word model.** Everything above it is built; see
-      [The wake-word model](#the-wake-word-model) for the shape it must have and the
-      licensing decision to make first.
+- [x] Speech-stack architecture — tiered pipeline, all seams, heuristic reasoning tier
+- [ ] **Add sherpa-onnx and the model files.** Everything around them is built; see
+      [§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do).
+- [ ] Wake-word model, once the licence route is chosen
 - [ ] Speaker verification so only your voice wakes Angel (the toggle already exists)
-- [ ] Transcript-side codeword matching with a small streaming ASR
+- [ ] LLM-backed reasoning for the ambiguous severity band
 - [ ] Persistence (Room) and real repository implementations
 - [ ] Real Maps SDK behind `RouteCanvas`, plus live location
 - [ ] Speech recognition, diarisation and on-device codeword spotting

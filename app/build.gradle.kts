@@ -37,6 +37,12 @@ android {
 }
 
 dependencies {
+    // sherpa-onnx ships Android as a prebuilt .aar from its GitHub releases rather than
+    // a Maven artifact (the JitPack coordinate is JVM/desktop only and would drag in
+    // ~100 MB of linux/macOS/Windows natives). Drop the AAR into app/libs/ and it is
+    // picked up here — see "Speech stack" in the README.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar", "*.jar"))))
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
