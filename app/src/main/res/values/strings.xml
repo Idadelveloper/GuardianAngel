@@ -1,3 +1,36 @@
 <resources>
-    <string name="app_name">GuardianAngel</string>
+    <string name="app_name">Guardian Angel</string>
+
+    <!-- Home · header -->
+    <string name="greeting_eyebrow">WATCHING OVER YOU</string>
+    <string name="greeting_title">Good evening, Ida</string>
+    <string name="status_safe">Safe</string>
+
+    <!-- Home · active guardian -->
+    <string name="guardian_active_header">Guardian active</string>
+    <string name="guardian_active_title">Walking home</string>
+    <string name="guardian_active_body">Maya and two others can see your live location until you arrive. We\'ll check in with you if you stop moving.</string>
+    <string name="status_sharing">Sharing location</string>
+    <string name="status_eta">12 min to home</string>
+
+    <!-- Home · emergency trigger -->
+    <string name="sos_label">SOS</string>
+    <string name="sos_description">Send an emergency alert to your trusted circle</string>
+    <string name="sos_hint">Press and hold to alert your circle</string>
+
+    <!-- Home · quick actions -->
+    <string name="action_check_in">Check in</string>
+    <string name="action_call">Call</string>
+
+    <!-- Home · preferences -->
+    <string name="preferences_title">While a guardian is active</string>
+    <string name="preference_share_location">Share my live location</string>
+    <string name="preference_auto_check_in">Ask me to check in every 15 minutes</string>
+
+    <!-- Home · trusted contacts -->
+    <string name="contacts_title">Trusted circle</string>
+    <string name="contacts_body">These are the people we reach first. Add someone who usually has their phone nearby.</string>
+    <string name="contacts_field_label">Name or phone number</string>
+    <string name="contacts_field_placeholder">e.g. Maya Bernard</string>
+    <string name="contacts_add">Add to circle</string>
 </resources>

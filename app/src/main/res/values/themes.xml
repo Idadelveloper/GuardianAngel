@@ -1,5 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      Platform theme for the launch window.
 
-    <style name="Theme.GuardianAngel" parent="android:Theme.Material.Light.NoActionBar" />
+      Its only job is to paint the warm canvas behind the activity before Compose takes
+      over, so launching the app never flashes the platform's white. Colours inside the UI
+      come from GuardianAngelTheme; keep this file in sync with `Canvas` in Color.kt.
+    -->
+    <style name="Theme.GuardianAngel" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/guardian_canvas</item>
+        <item name="android:colorBackground">@color/guardian_canvas</item>
+
+        <!-- Edge-to-edge: Compose draws behind the bars; icon polarity is set from the
+             theme composable so it tracks light/dark at runtime. -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
 </resources>

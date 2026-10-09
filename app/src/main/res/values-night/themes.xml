@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Night counterpart: the warm espresso canvas, so the launch window matches the
+         dark scheme instead of flashing cream. -->
+    <style name="Theme.GuardianAngel" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/guardian_canvas_dark</item>
+        <item name="android:colorBackground">@color/guardian_canvas_dark</item>
+
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
