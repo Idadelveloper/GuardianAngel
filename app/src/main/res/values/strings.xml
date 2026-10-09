@@ -1,36 +1,128 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">Guardian Angel</string>
 
-    <!-- Home · header -->
-    <string name="greeting_eyebrow">WATCHING OVER YOU</string>
-    <string name="greeting_title">Good evening, Ida</string>
-    <string name="status_safe">Safe</string>
+    <!-- App bar -->
+    <string name="app_wordmark">Guardian Angel</string>
+    <string name="mode_badge_standby">STANDBY</string>
+    <string name="mode_badge_active">ACTIVE</string>
+    <string name="mode_badge_recording">RECORDING</string>
+    <string name="mode_caption_standby">Say nothing · mic is off</string>
+    <string name="mode_caption_listening">Listening for codewords</string>
+    <string name="mode_caption_recording">Recording in progress</string>
+    <string name="action_quick_alert">Quick alert</string>
 
-    <!-- Home · active guardian -->
-    <string name="guardian_active_header">Guardian active</string>
-    <string name="guardian_active_title">Walking home</string>
-    <string name="guardian_active_body">Maya and two others can see your live location until you arrive. We\'ll check in with you if you stop moving.</string>
-    <string name="status_sharing">Sharing location</string>
-    <string name="status_eta">12 min to home</string>
+    <!-- Status strip -->
+    <string name="status_standby">Guardian Angel is on standby</string>
+    <string name="status_listening">Guardian Angel is active &amp; listening</string>
+    <string name="status_recording">Guardian Angel is recording</string>
+    <string name="label_encrypted">Encrypted</string>
 
-    <!-- Home · emergency trigger -->
-    <string name="sos_label">SOS</string>
-    <string name="sos_description">Send an emergency alert to your trusted circle</string>
-    <string name="sos_hint">Press and hold to alert your circle</string>
+    <!-- Greeting -->
 
-    <!-- Home · quick actions -->
-    <string name="action_check_in">Check in</string>
-    <string name="action_call">Call</string>
+    <!-- Standby hero -->
+    <string name="shield_title">Guardian shield</string>
+    <string name="shield_body_at_haven">Resting at %1$s. Audio analysis is idle.</string>
+    <string name="shield_body_idle">Audio analysis is idle.</string>
+    <string name="chip_battery">Battery %1$d%%</string>
+    <string name="chip_geofence">Geofence active</string>
+    <string name="chip_mic_dormant_encrypted">Mic dormant · encrypted</string>
+    <string name="chip_mic_dormant">Mic dormant</string>
+    <string name="action_activate_shield">Activate guardian shield</string>
 
-    <!-- Home · preferences -->
-    <string name="preferences_title">While a guardian is active</string>
-    <string name="preference_share_location">Share my live location</string>
-    <string name="preference_auto_check_in">Ask me to check in every 15 minutes</string>
+    <!-- Listening hero -->
+    <string name="vigilance_calibrated">Silent guard calibrated</string>
+    <string name="vigilance_title">Vigilance sphere online</string>
+    <string name="vigilance_subtitle">Listening for your codewords</string>
+    <string name="telemetry_battery">Battery</string>
+    <string name="telemetry_codewords">Codewords</string>
+    <string name="telemetry_codewords_armed">Armed</string>
+    <string name="telemetry_gps">GPS</string>
+    <string name="telemetry_gps_accuracy">±%1$sm</string>
+    <string name="telemetry_unavailable">—</string>
+    <string name="action_stand_down">Stand down</string>
 
-    <!-- Home · trusted contacts -->
-    <string name="contacts_title">Trusted circle</string>
-    <string name="contacts_body">These are the people we reach first. Add someone who usually has their phone nearby.</string>
-    <string name="contacts_field_label">Name or phone number</string>
-    <string name="contacts_field_placeholder">e.g. Maya Bernard</string>
-    <string name="contacts_add">Add to circle</string>
+    <!-- Safety score -->
+    <string name="safety_score_title">Location Safety Score</string>
+    <string name="safety_score_subtitle">Live radius evaluation</string>
+    <string name="safety_score_live">Live</string>
+    <string name="safety_score_scanning">Scanning</string>
+    <string name="safety_score_unit">SCORE</string>
+    <string name="safety_score_percent">%1$d%%</string>
+    <!-- A score on a fixed 0-100 scale, not a count of anything, so it is not a plural. -->
+    <string name="safety_score_description" tools:ignore="PluralsCandidate">Safety score %1$d out of 100</string>
+    <string name="safety_delta_down">%1$d%%</string>
+    <string name="safety_delta_up">+%1$d%%</string>
+    <string name="action_scan_area">Scan area</string>
+    <string name="action_guide_home">Guide me home</string>
+
+    <!-- Safety bands -->
+    <string name="safety_band_secure">Safe Haven</string>
+    <string name="safety_band_guarded">Moderate Vigilance</string>
+    <string name="safety_band_elevated">Heightened Risk</string>
+    <string name="safety_band_high">High Risk</string>
+
+    <!-- Duress trigger -->
+    <string name="duress_title">Emergency fast-trigger</string>
+    <string name="duress_haptic">Haptic on</string>
+    <string name="duress_idle">Hold for duress alert (3s)</string>
+    <string name="duress_holding">Keep holding…</string>
+    <string name="duress_fired">Alert dispatched</string>
+    <string name="duress_hint">Sends a silent alert and your live location. No sound, no screen flash.</string>
+    <string name="duress_a11y">Hold for three seconds to send a duress alert to your guardians</string>
+    <string name="duress_a11y_action">Send duress alert</string>
+
+    <!-- Recording panel -->
+    <string name="recording_title">Recording &amp; transcribing</string>
+    <string name="recording_triggered_by">Triggered by your %1$s codeword</string>
+    <string name="recording_started_manually">Started manually</string>
+    <string name="recording_none_alerted">No one has been alerted yet</string>
+    <string name="recording_police_called">Emergency services called</string>
+    <string name="recording_location_shared">Live location is being shared</string>
+    <string name="recording_transcript">Live transcript</string>
+    <string name="action_stop_recording">Stop recording</string>
+    <string name="recording_mistake_hint">Triggered by mistake? Stopping now cancels the alert and discards nothing already sent.</string>
+
+    <!-- Codewords -->
+    <string name="codewords_title">Voice trigger words</string>
+    <string name="action_customize">Customize</string>
+    <string name="codeword_quoted">“%1$s”</string>
+    <string name="codeword_not_armed">Not armed</string>
+    <string name="tier_safe">Safe check</string>
+    <string name="tier_safe_desc">Tells your circle you\'re okay</string>
+    <string name="tier_caution">Caution</string>
+    <string name="tier_caution_desc">Starts transcribing quietly</string>
+    <string name="tier_danger">Danger</string>
+    <string name="tier_danger_desc">Alerts your circle with location</string>
+    <string name="tier_emergency">Emergency</string>
+    <string name="tier_emergency_desc">Calls 911 and alerts everyone</string>
+
+    <!-- Guardians -->
+    <string name="guardians_title">Your guardians</string>
+    <plurals name="guardians_online">
+        <item quantity="one">%1$d online</item>
+        <item quantity="other">%1$d online</item>
+    </plurals>
+    <string name="guardians_top_priority">1st</string>
+    <string name="presence_online">Online</string>
+    <string name="presence_offline">Offline</string>
+    <string name="presence_unknown">Unknown</string>
+    <string name="guardian_meta">%1$s · %2$s</string>
+    <string name="guardian_meta_located">%1$s · %2$s (%3$s)</string>
+    <string name="action_ping_guardian">Ping %1$s</string>
+    <string name="action_call_guardian">Call %1$s</string>
+
+    <!-- Safe walk -->
+    <string name="safewalk_title_idle">Start a safe walk</string>
+    <string name="safewalk_title_active">Safe walk in progress</string>
+    <string name="safewalk_subtitle">Guarded tracking until you arrive</string>
+    <string name="safewalk_duration">~%1$d min</string>
+    <string name="safewalk_eta">ETA %1$s</string>
+    <string name="action_begin_journey">Begin guarded journey</string>
+    <string name="action_view_journey">View journey</string>
+
+    <!-- Bottom navigation -->
+    <string name="nav_home">Home</string>
+    <string name="nav_map">Map</string>
+    <string name="nav_activity">Activity</string>
+    <string name="nav_settings">Settings</string>
 </resources>

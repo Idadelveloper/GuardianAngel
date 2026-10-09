@@ -3,6 +3,7 @@ package com.example.guardianangel.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -52,6 +53,8 @@ fun GuardianTextField(
     placeholder: String? = null,
     leadingIcon: ImageVector? = null,
     trailingIcon: ImageVector? = null,
+    onTrailingIconClick: (() -> Unit)? = null,
+    trailingIconDescription: String? = null,
     enabled: Boolean = true,
     isError: Boolean = false,
     supportingText: String? = null,
@@ -160,9 +163,22 @@ fun GuardianTextField(
                             if (trailingIcon != null) {
                                 Icon(
                                     imageVector = trailingIcon,
-                                    contentDescription = null,
+                                    contentDescription = trailingIconDescription,
                                     tint = colors.iconMuted,
-                                    modifier = Modifier.size(20.dp),
+                                    modifier = Modifier
+                                        .then(
+                                            if (onTrailingIconClick != null) {
+                                                // 40dp keeps the tap target usable even
+                                                // though the glyph itself is 20dp.
+                                                Modifier
+                                                    .size(40.dp)
+                                                    .clip(GuardianTheme.shapes.pill)
+                                                    .clickable(onClick = onTrailingIconClick)
+                                                    .padding(10.dp)
+                                            } else {
+                                                Modifier.size(20.dp)
+                                            }
+                                        ),
                                 )
                             }
                         }

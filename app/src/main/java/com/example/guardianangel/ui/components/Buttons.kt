@@ -51,6 +51,7 @@ fun GuardianPrimaryButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
+    trailingIcon: ImageVector? = null,
     enabled: Boolean = true,
 ) {
     Button(
@@ -66,7 +67,7 @@ fun GuardianPrimaryButton(
         ),
         contentPadding = ButtonContentPadding,
     ) {
-        ButtonContent(text, leadingIcon)
+        ButtonContent(text, leadingIcon, trailingIcon)
     }
 }
 
@@ -80,6 +81,7 @@ fun GuardianAccentButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
+    trailingIcon: ImageVector? = null,
     enabled: Boolean = true,
 ) {
     Button(
@@ -95,7 +97,7 @@ fun GuardianAccentButton(
         ),
         contentPadding = ButtonContentPadding,
     ) {
-        ButtonContent(text, leadingIcon)
+        ButtonContent(text, leadingIcon, trailingIcon)
     }
 }
 
@@ -106,6 +108,7 @@ fun GuardianOutlinedButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: ImageVector? = null,
+    trailingIcon: ImageVector? = null,
     enabled: Boolean = true,
 ) {
     OutlinedButton(
@@ -129,12 +132,16 @@ fun GuardianOutlinedButton(
         ),
         contentPadding = ButtonContentPadding,
     ) {
-        ButtonContent(text, leadingIcon)
+        ButtonContent(text, leadingIcon, trailingIcon)
     }
 }
 
 @Composable
-private fun ButtonContent(text: String, leadingIcon: ImageVector?) {
+private fun ButtonContent(
+    text: String,
+    leadingIcon: ImageVector?,
+    trailingIcon: ImageVector?,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
@@ -147,6 +154,13 @@ private fun ButtonContent(text: String, leadingIcon: ImageVector?) {
             )
         }
         Text(text = text, style = GuardianTheme.type.labelLg)
+        if (trailingIcon != null) {
+            Icon(
+                imageVector = trailingIcon,
+                contentDescription = null,
+                modifier = Modifier.size(ButtonIconSize),
+            )
+        }
     }
 }
 

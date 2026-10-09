@@ -87,6 +87,13 @@ class ColorContrastTest {
         Pairing("control border on card", g.borderControl, g.layer1, NON_TEXT),
         Pairing("focus ring on canvas", g.focusRing, g.canvas, NON_TEXT),
 
+        // Recording panel: drawn on the error container, with the stop control given
+        // the primary dark treatment because an outline could not clear 3:1 here.
+        Pairing("recording panel text", m.onErrorContainer, m.errorContainer, TEXT),
+        Pairing("stop-recording label", g.canvas, m.onSurface, TEXT),
+        Pairing("stop-recording fill on panel", m.onSurface, m.errorContainer, NON_TEXT),
+        Pairing("flagged transcript line", m.error, m.errorContainer, TEXT),
+
         // Inactive navigation icons carry meaning, so they are held to 3:1.
         Pairing("inactive nav icon on canvas", g.iconMuted, g.canvas, NON_TEXT),
         Pairing("placeholder text in field", g.iconMuted, g.canvas, NON_TEXT),

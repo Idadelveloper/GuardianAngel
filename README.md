@@ -1,2 +1,313 @@
-# GuardianAngel
-keeping women safe
+# Guardian Angel
+
+An Android safety companion for women who find themselves alone and uneasy — walking home
+at night, meeting a stranger for the first time, stuck in a group that has started to
+feel wrong.
+
+Guardian Angel listens for a **codeword**. Say it, and the app quietly starts recording
+and transcribing, works out from the conversation whether the situation is actually
+escalating, and — only if it is — alerts the people you chose and shares your location.
+No fumbling for a phone, no obvious panic button, no sound.
+
+> **Status:** early build. The design system, the home screen and the data contracts are
+> in place; the speech pipeline, map and persistence layers are not yet wired up. See
+> [Roadmap](#roadmap).
+
+---
+
+## Why it works this way
+
+Three constraints shaped every decision in this app:
+
+**It has to be discreet.** The whole point is getting help without visibly asking for it.
+So the trigger is a spoken word rather than a tap, alerts dispatch silently, and nothing
+flashes or chimes when the guardian activates.
+
+**It has to tolerate mistakes.** Codewords are ordinary words — you will say "pineapple"
+in a normal sentence eventually. The AI evaluates context before escalating, you get a
+notification you can act on, and stopping a recording is always one tap with no
+confirmation dialog. A safety app that cries wolf gets uninstalled.
+
+**It has to stay calm.** The interface is warm cream and soft rose, not red klaxons. A
+person reading this screen may already be frightened; the UI's job is to lower their
+heart rate, not raise it.
+
+---
+
+## Angel
+
+The app has a mascot. Angel is a chibi guardian who sits at the top of the home screen
+and mirrors the user's safety state — halo colour, wing posture, expression and aura all
+shift with the score. In most sessions she is the only thing the user actually reads.
+
+She is drawn entirely with Compose `Canvas` primitives rather than shipped as five SVGs
+or Lottie files. That buys three things the asset route could not: every tier is one
+component so the geometry cannot drift between moods, moods can cross-fade as the score
+moves, and the whole thing costs a few kilobytes of code instead of five animation
+payloads.
+
+| Tier | When | How she looks |
+|---|---|---|
+| **Resting** | Mic dormant, on standby | Soft golden halo breathing at 2.5s, gentle acoustic rings |
+| **Sanctuary** | At a safe haven, or 100% | Serene 4s float, rosy cheeks, golden sparkles |
+| **Cautious** | 75–95% — evening, unfamiliar route | Amber halo tilted 3°, eyes scanning, wings tucked, one worry drop |
+| **Warning** | 50–74% — poor lighting, acoustic anomaly | Trembling, flickering orange halo, wings raised to shield, two drops |
+| **Critical** | Below 50%, or a duress trigger | Crimson strobe, red shockwaves, full enclosing wing shield, racing heartbeat |
+
+`AngelMood.fromScore(score, atSafeHaven, isArmed, inDuress)` is the single place that
+mapping lives, so every screen derives the same mood from the same inputs.
+
+Angel is decorative by default — the card around her always says the same thing in words,
+so nothing is lost if she is not perceived.
+
+## Features
+
+### Codewords — four escalation tiers
+
+Each tier is a phrase you pick during onboarding. The AI weighs what it hears against the
+tier you invoked before acting.
+
+| Tier | What saying it does |
+|---|---|
+| **Safe** | Tells chosen contacts you're okay — cancels a false alarm |
+| **Caution** | Starts transcribing quietly. Nobody is notified |
+| **Danger** | Alerts your trusted circle with your live location |
+| **Emergency** | Calls emergency services *and* alerts your circle |
+
+### Recording & transcription
+
+When a codeword fires, the app records, transcribes, and attributes speech to separate
+voices (yours is enrolled during setup). It flags danger signals in the transcript —
+repeated refusals, raised voices, sounds that imply a struggle — and uses them, together
+with location and time of day, to decide whether to escalate.
+
+Transcripts are saved to a library where you can review, annotate, bookmark, export or
+delete them. Each one is pinned to where it was recorded.
+
+### Location Safety Score
+
+A live estimate of how likely you are to run into trouble where you are right now, shown
+on the home screen so you can avoid a bad situation rather than react to one.
+
+It is built from public crime data plus contextual factors: time of day, distance from
+your safe base, proximity to safe nodes (police stations, open businesses, friends'
+homes), street lighting, and how long you have been away from home.
+
+The score is a **probability estimate, not a guarantee**, so the UI leads with a plain
+band — Safe Haven, Moderate Vigilance, Heightened Risk, High Risk — and a one-line
+explanation, with the percentage and every contributing factor shown underneath. Colour
+runs green through amber to red, warmed to fit the palette, and is never the only signal:
+each band carries its own label and glyph.
+
+Any factor beyond the defaults (time, location, destination, crime data) must be switched
+on by hand. Demographic inputs are **opt-in only and off by default** — they can improve a
+risk estimate, but silently profiling a user by race or age is not something an app should
+do on her behalf.
+
+### Safest-route navigation *(planned)*
+
+The Map tab will route you by safest path rather than shortest, using the same data as the
+score, with your live location, a start and a destination.
+
+### Safe Walk
+
+A monitored journey with an expected arrival time. If you don't check in by the ETA, your
+guardians are notified automatically.
+
+### Trusted circle
+
+Up to six emergency contacts, ranked, each with a name, relationship and number. The home
+screen shows who is actually reachable right now — knowing your top contact is offline
+*before* something happens is the point.
+
+---
+
+## Screens
+
+Four tabs, a setup wizard, and three stacked sub-screens.
+
+### Home
+
+Two faces of one screen, chosen by whether a guarded walk is under way:
+
+| State | What it shows |
+|---|---|
+| **Sanctuary** | At a safe haven. Angel rests, the gauge is pinned at 100%, and the only prominent action is starting a walk. |
+| **Out & about** | A journey is live. Angel turns watchful, the gauge goes live with lighting and arrival tiles, and the duress trigger and check-in take over. |
+
+Recording cuts across both: when a trigger fires, a recording panel expands above
+everything with an elapsed timer, live waveform, running transcript, exactly who has been
+alerted, and a full-width **Stop recording** button.
+
+The duress trigger is a **three-second hold**; stopping is one immediate tap. Those are
+deliberately asymmetric — arming dispatches a silent alert and can call police, so a
+pocket brush must not fire it, but a frightened user standing down should not face a
+confirmation dialog.
+
+### Map
+
+Standby shows the home geofence, a search bar and quick destinations. Picking one draws
+both corridors — the safe route as a solid glowing line, the unlit shortcut dashed with a
+warning marker — and opens a sheet comparing them. **Walk with Angel** arms the guardian
+and hands off to Home's journey state.
+
+> The map itself is `RouteCanvas`, a stylised Compose canvas. There is no Maps SDK key in
+> this project yet, and shipping a half-wired map view would be worse than an honest
+> abstraction. Routes arrive as normalised 0..1 points, so swapping in a real map means
+> replacing one composable.
+
+### Activity
+
+A log of monitored sessions and a movement-intelligence rollup behind one segmented
+control. Tapping a session opens the full diarized timeline — who said what when, which
+sounds the acoustic model flagged, and what Angel did about it.
+
+The design brief had the log and the analytics as separate screens. Folding them into one
+tab keeps the bottom bar at four entries and means the user does not have to remember
+which tab holds which half of the same subject.
+
+### Settings
+
+Profile, a word from Angel, then the safeguard list. Each row reports live state in its
+subtitle, so the whole setup is auditable without opening anything. Three sub-screens
+manage codewords, guardians, and voice sensitivity.
+
+### Onboarding
+
+Sign up → permissions → voice → guardians → codewords. Each step is a wizard page with a
+pinned call to action and Angel explaining what she needs and why.
+
+Two places where the reference was simplified deliberately:
+
+- **Voice calibration** carried a countdown, a progress bar, three telemetry chips and
+  two transport controls at once. During setup that reads as a studio console; it is now
+  one prompt, one button, one progress ring, with clarity chips appearing only once there
+  is something real to report.
+- **Codewords** put all four tiers plus a PIN section on one page. That is a lot of
+  consequence to absorb at once and the tiers only make sense in order, so they are
+  paginated — one word, one explanation, and an example built from what you just typed.
+
+## Design system
+
+Plus Jakarta Sans throughout, on a warm cream canvas with soft rose and apricot accents —
+closer to Partiful or Luma than to a security product.
+
+Everything lives in `ui/theme/` and is consumed through two accessors: `MaterialTheme` for
+standard Material roles and `GuardianTheme` for the brand tokens Material has no slot for
+(`GuardianTheme.colors.accentSoft`, `GuardianTheme.spacing.lg`, `GuardianTheme.shapes.pill`,
+`GuardianTheme.type.labelSm`). No component hard-codes a hex value.
+
+- **Type** — Plus Jakarta Sans, bundled as five static instances cut from the upstream
+  variable font. Static rather than variable because `minSdk` is 24 while font variation
+  settings only take effect from API 26.
+- **Elevation** — ambient warm glows and tonal layering rather than hard drop shadows.
+- **Icons** — a hand-built stroke set (2px, round caps); Material's filled glyphs don't
+  match the spec.
+- **Dark mode** — a warm espresso night scheme, since this app gets used after dark.
+- **Accessibility** — every on-screen colour pairing is verified against WCAG 2.1 AA by
+  `ColorContrastTest`, which fails the build if a pairing regresses. Where the design
+  document's values fell short for elements that *identify* a control (focus rings, form
+  borders, inactive nav icons), accessible siblings were added and documented in
+  `Color.kt`.
+
+---
+
+## Architecture
+
+```
+di/
+  AppContainer              the object graph — the single swap point for persistence
+domain/
+  model/                    GuardianSnapshot, SafetyScore, Codeword, MonitoredSession,
+                            SafeRoute, AccountSnapshot … plain Kotlin, no Android types
+  repository/               one interface per feature area
+data/
+  Fake*Repository           in-memory stand-ins, same shapes the real sources will emit
+  *Samples                  sample content shared by the fakes and every @Preview
+ui/
+  theme/                    colour schemes, type scale, shapes, spacing, elevation,
+                            the green-to-red safety ramp
+  mascot/                   Angel — mood model, per-tier style table, canvas renderer
+  components/               buttons, cards, chips, inputs, switches, nav, scaffolds
+  icons/                    GuardianIcons — stroke-based icon set
+  navigation/               routes, tabs, and the single NavHost
+  onboarding/ home/ map/ activities/ settings/
+```
+
+### Where data will live
+
+Repositories are split by feature area rather than one god-object, so each can migrate
+independently when the database lands — contacts and codewords might move to an
+encrypted Room table first while analytics stays derived.
+
+| Repository | Owns | Likely storage |
+|---|---|---|
+| `AccountRepository` | profile, onboarding progress, permissions, voice profile, disarm PIN | Room + keystore |
+| `ContactsRepository` | the trusted circle | encrypted Room table |
+| `CodewordRepository` | the four tiers and their phrases | encrypted Room table |
+| `ActivityRepository` | sessions, transcript lines, analytics rollups | Room; analytics as a query |
+| `RouteRepository` | destinations and route planning | Room + routing service |
+| `GuardianRepository` | the live snapshot the home screen renders | composed from the above + sensors |
+
+Secrets are represented by their *status*, never their value: `VoiceProfile` carries a
+clarity score rather than the voiceprint, and `DisarmPin` carries only whether a PIN is
+set. The real vectors belong in the hardware keystore, and keeping them out of the domain
+model means they can never reach a log, a screenshot or a backup.
+
+Screens read one snapshot and never touch a data source. `AppContainer` is constructed
+once in `GuardianAngelApp`; swapping `InMemoryAppContainer` for a persistence-backed one
+is the only change needed, and no screen or view model knows the difference.
+
+Reads are `Flow` because the data is genuinely live: the score re-evaluates as the user
+moves, contacts come online, and a session accumulates transcript lines while open.
+
+### Tech
+
+Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
+Coroutines + Flow · ViewModel · `minSdk` 24, `targetSdk` 37
+
+## Building
+
+```bash
+./gradlew :app:assembleDebug        # build
+./gradlew :app:testDebugUnitTest    # unit tests, including the contrast guard
+./gradlew :app:installDebug         # install on a connected device
+```
+
+Android Studio previews cover all three home screen states in light and dark.
+
+---
+
+## Roadmap
+
+- [x] Design system, theme and component library
+- [x] Angel mascot — five animated tiers driven by the safety score
+- [x] Navigation: four tabs, setup wizard, stacked sub-screens
+- [x] Home — sanctuary, out & about, and recording states
+- [x] Map — standby and safest-route comparison (stylised canvas)
+- [x] Activity — session log, diarized transcript, movement insights
+- [x] Settings — hub plus codewords, guardians and voice sub-screens
+- [x] Onboarding — account, permissions, voice, guardians, codewords
+- [x] Domain models and repository contracts for every feature area
+- [ ] **Localise the new screens.** The theme, navigation and original Home copy live in
+      `strings.xml`; copy added with the Angel screens is still inline in the composables
+      and needs a pass before any non-English build.
+- [ ] Persistence (Room) and real repository implementations
+- [ ] Real Maps SDK behind `RouteCanvas`, plus live location
+- [ ] Speech recognition, diarisation and on-device codeword spotting
+- [ ] AI escalation model over the live transcript
+- [ ] Real safety-score model over public crime data
+- [ ] Background service, notifications and the accidental-trigger flow
+- [ ] Transcript export, annotation and deletion
+- [ ] Wearable companion
+
+## Privacy
+
+This app records audio and tracks location — the two most sensitive permissions a phone
+can grant. The intended design: recording only after an explicit trigger, transcripts
+encrypted at rest, the user able to delete any transcript permanently, demographic factors
+opt-in and off by default, and location shared only with contacts the user named and only
+while an alert is live.
+
+None of that is implemented yet. Treat the current build as a UI prototype and do not put
+real personal data into it.

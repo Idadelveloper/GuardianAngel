@@ -21,19 +21,19 @@ import androidx.compose.ui.graphics.Color
 // Warm surface system (design.md › Surface System)
 // ---------------------------------------------------------------------------
 
-/** Surface canvas — "pure, soft daylight foundation". */
-val Canvas = Color(0xFFFFFDF7)
+/** Surface canvas — soft warm blush white. */
+val Canvas = Color(0xFFFFF8F8)
 
 /** Surface layer 1 — cards & sheets. */
-val Layer1 = Color(0xFFFFF7F0)
+val Layer1 = Color(0xFFFFFFFF)
 
-/** Steps interpolated between [Canvas] and [SurfaceDimLight] to fill the M3 container ramp. */
+/** The M3 container ramp, stepping from pure white down into the blush family. */
 val SurfaceContainerLowestLight = Color(0xFFFFFFFF)
-val SurfaceContainerLowLight = Color(0xFFFFFBF5)
-val SurfaceContainerLight = Color(0xFFFFF7F0)
-val SurfaceContainerHighLight = Color(0xFFFBF0E7)
-val SurfaceContainerHighestLight = Color(0xFFF6E9DE)
-val SurfaceDimLight = Color(0xFFEDDFD4)
+val SurfaceContainerLowLight = Color(0xFFFFF0F2)
+val SurfaceContainerLight = Color(0xFFFBEAEC)
+val SurfaceContainerHighLight = Color(0xFFF5E4E7)
+val SurfaceContainerHighestLight = Color(0xFFEFDFE1)
+val SurfaceDimLight = Color(0xFFE6D6D9)
 
 // ---------------------------------------------------------------------------
 // Accents (design.md › Core Roles)
@@ -51,28 +51,44 @@ val PeachCream = Color(0xFFFFDBB0)
 /** Soft buttery pale cream — safe status, gentle banners, card glow accents. */
 val ButterCream = Color(0xFFFFFAD3)
 
-/** Deep warm espresso charcoal — primary type and iconography on light surfaces. */
-val Espresso = Color(0xFF2D2426)
+/**
+ * Protective midnight navy — primary type, iconography and the high-contrast CTA fill.
+ *
+ * Named [Espresso] historically; the brand moved to navy while keeping the role identical,
+ * so the token name is retained to avoid churning every call site.
+ */
+val Espresso = Color(0xFF1E2238)
 
 // ---------------------------------------------------------------------------
 // Borders & dividers (design.md › Borders & Dividers)
 // ---------------------------------------------------------------------------
 
-/** Default border — card boundaries, dividers. Decorative only (1.27:1): never the sole
+/** Default border — card boundaries, dividers. Decorative only (1.19:1): never the sole
  *  means of identifying an interactive control. */
-val BorderDefault = Color(0xFFF2DFD5)
+val BorderDefault = Color(0xFFF7E1E5)
 
-/** Emphasized border — nested containers, segmented controls. Decorative (1.47:1). */
-val BorderEmphasis = Color(0xFFE8CEBF)
+/** Emphasized border — nested containers, segmented controls. Decorative. */
+val BorderEmphasis = Color(0xFFF2D4D9)
 
-/** Accessible warm-taupe border for elements whose boundary *identifies* the control
- *  (text fields, checkboxes, radios, outlined buttons). 3.37:1 on [Canvas],
- *  3.23:1 on [Layer1] — satisfies WCAG 1.4.11. */
-val BorderControl = Color(0xFF9E8678)
+/** Accessible border for elements whose boundary *identifies* the control (text fields,
+ *  checkboxes, radios, outlined buttons). 3.78:1 on [Canvas], 3.59:1 on the tinted
+ *  container — satisfies WCAG 1.4.11 across the whole surface ramp. */
+val BorderControl = Color(0xFF8E7B80)
 
-/** Muted warm icon/label tint, 4.40:1 on [Canvas]. Replaces the design document's
- *  "espresso at 45% opacity" for inactive navigation, which measured only 2.70:1. */
+/** Muted icon/label tint for inactive navigation and metadata, >=4:1 everywhere.
+ *  Replaces the design document's "foreground at 45% opacity", which measured 2.70:1. */
 val IconMuted = Color(0xFF857372)
+
+// ---------------------------------------------------------------------------
+// Duress (design spec › Emergency Duress / High Threat)
+// ---------------------------------------------------------------------------
+
+/** Solid duress fill. 5.48:1 with white, so it can carry a button label. */
+val DuressRed = Color(0xFFD50000)
+
+/** High-visibility crimson for the duress aura, halo strobe and shockwave pulses.
+ *  Decorative only — at 3.85:1 with white it must never be a text background. */
+val DuressBright = Color(0xFFFF1744)
 
 // ---------------------------------------------------------------------------
 // Brand ramps (design.md frontmatter)

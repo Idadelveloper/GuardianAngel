@@ -185,6 +185,12 @@ data class GuardianColorTokens(
     val cautionContainer: Color,
     val onCautionContainer: Color,
 
+    /** Solid duress fill — the SOS button. Carries white text at 5.48:1. */
+    val duress: Color,
+    /** Content on [duress]. */
+    val onDuress: Color,
+    /** High-visibility crimson for duress auras and halo strobes. Decorative only. */
+    val duressGlow: Color,
     /** Diffused halo behind SOS / priority focal elements (elevation level 3). */
     val focalGlow: Color,
     /** Ambient warm shadow for cards (level 1). */
@@ -216,6 +222,9 @@ internal val GuardianLightColorTokens = GuardianColorTokens(
     onSafeContainer = Espresso,
     cautionContainer = PeachCream,
     onCautionContainer = Espresso,
+    duress = DuressRed,
+    onDuress = Color.White,
+    duressGlow = DuressBright,
     focalGlow = AccentSoft.copy(alpha = 0.45f),
     ambientShadow = Espresso.copy(alpha = 0.04f),
     floatingShadow = Espresso.copy(alpha = 0.08f),
@@ -242,6 +251,9 @@ internal val GuardianDarkColorTokens = GuardianColorTokens(
     onSafeContainer = OnTertiaryContainerDark,
     cautionContainer = SecondaryContainerDark,
     onCautionContainer = OnSecondaryContainerDark,
+    duress = DuressRed,
+    onDuress = Color.White,
+    duressGlow = DuressBright,
     focalGlow = PrimaryDark.copy(alpha = 0.35f),
     ambientShadow = Color.Black.copy(alpha = 0.40f),
     floatingShadow = Color.Black.copy(alpha = 0.55f),
