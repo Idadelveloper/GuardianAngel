@@ -44,6 +44,7 @@ object Routes {
     const val SETTINGS_CODEWORDS = "settings/codewords"
     const val SETTINGS_GUARDIANS = "settings/guardians"
     const val SETTINGS_VOICE = "settings/voice"
+    const val SETTINGS_SAFE_PLACES = "settings/safe-places"
 
     /**
      * Re-enrolling the voiceprint from settings.

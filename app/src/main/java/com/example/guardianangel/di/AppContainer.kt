@@ -73,6 +73,14 @@ interface AppContainer {
     val weatherProvider: com.example.guardianangel.data.weather.WeatherProvider
     val placesSearchProvider: com.example.guardianangel.data.places.PlacesSearchProvider
 
+    /**
+     * The one path a guardian alert takes, whatever triggered it.
+     *
+     * On the container because both the SOS hold (UI) and a spoken codeword (the
+     * listening service, which has no activity) have to reach the same code.
+     */
+    val alertDispatcher: com.example.guardianangel.domain.alert.AlertDispatcher
+
     /** The signed-in user's id, for anything scoped to them. */
     suspend fun currentUserId(): String
 
@@ -141,6 +149,19 @@ class InMemoryAppContainer(
     )
 
     override suspend fun currentUserId(): String = "preview-user"
+
+    override val alertDispatcher: com.example.guardianangel.domain.alert.AlertDispatcher =
+        com.example.guardianangel.domain.alert.AlertDispatcher(
+            notificationAgent = com.example.guardianangel.agent.GuardianNotificationAgent(
+                com.example.guardianangel.data.PreviewGuardianNotifier()
+            ),
+            contacts = contactsRepository,
+            guardianRepository = guardianRepository,
+            recorder = sessionRecorder,
+            profileName = { "Preview" },
+            currentLocation = { null },
+            sessionEntries = { emptyList() },
+        )
 
     override suspend fun onAuthenticated(user: AuthUser) = Unit
 

@@ -25,6 +25,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
@@ -243,15 +249,63 @@ fun SettingsCodewordsScreen(
 @Composable
 fun SettingsGuardiansRoute(
     repository: ContactsRepository,
+    accountRepository: AccountRepository,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val contacts by repository.observeContacts()
         .collectAsStateWithLifecycle(initialValue = emptyList())
+    val account by accountRepository.observeAccount()
+        .collectAsStateWithLifecycle(initialValue = null)
+
+    // Asked for here rather than at the moment of an alert.
+    //
+    // A permission dialog is the last thing that should appear between a duress hold
+    // and a message going out, and this is the screen where the reason for it is
+    // self-evident: she is adding the people it will text.
+    val context = LocalContext.current
+    var canSendSilently by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val smsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> canSendSilently = granted }
+
+    // Calling needs its own permission, asked for only when she turns the setting on.
+    // Requesting it up front, next to the microphone, would read as an app asking to
+    // make phone calls for no stated reason.
+    var canPlaceCalls by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val callLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        canPlaceCalls = granted
+        // The setting is saved either way. Refused, the alert still posts a one-tap call
+        // notification, which is weaker but not nothing — and the copy says which it is.
+        scope.launch { accountRepository.setCallGuardianOnEmergency(true) }
+    }
 
     SettingsGuardiansScreen(
         contacts = contacts,
+        canSendSilently = canSendSilently,
+        onEnableSilentAlerts = { smsLauncher.launch(Manifest.permission.SEND_SMS) },
+        callOnEmergency = account?.profile?.callGuardianOnEmergency ?: true,
+        canPlaceCalls = canPlaceCalls,
+        onCallOnEmergencyChange = { enabled ->
+            if (enabled && !canPlaceCalls) {
+                callLauncher.launch(Manifest.permission.CALL_PHONE)
+            } else {
+                scope.launch { accountRepository.setCallGuardianOnEmergency(enabled) }
+            }
+        },
         onBack = onBack,
         onAdd = { name, phone, relationship ->
             scope.launch {
@@ -284,6 +338,11 @@ fun SettingsGuardiansScreen(
     onRemove: (String) -> Unit,
     onTestPing: (String) -> Unit,
     modifier: Modifier = Modifier,
+    canSendSilently: Boolean = true,
+    onEnableSilentAlerts: () -> Unit = {},
+    callOnEmergency: Boolean = true,
+    canPlaceCalls: Boolean = false,
+    onCallOnEmergencyChange: (Boolean) -> Unit = {},
 ) {
     var showForm by remember { mutableStateOf(false) }
     var name by remember { mutableStateOf("") }
@@ -404,10 +463,59 @@ fun SettingsGuardiansScreen(
             )
         }
 
+        GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
+            SectionHeader(title = "How an alert reaches them", icon = GuardianIcons.Broadcast)
+            Spacer(Modifier.height(GuardianTheme.spacing.md))
+
+            Text(
+                text = if (canSendSilently) {
+                    "Every alert texts your guardians your location straight away, " +
+                        "without opening anything on your screen."
+                } else {
+                    "Right now an alert opens your messaging app with the text ready, " +
+                        "which needs one tap from you. Allow sending texts and it goes " +
+                        "out on its own."
+                },
+                style = GuardianTheme.type.bodySm,
+                color = GuardianTheme.materialColors.onSurfaceVariant,
+            )
+
+            if (!canSendSilently) {
+                Spacer(Modifier.height(GuardianTheme.spacing.md))
+                GuardianOutlinedButton(
+                    text = "Allow sending texts",
+                    onClick = onEnableSilentAlerts,
+                    leadingIcon = GuardianIcons.Broadcast,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            Spacer(Modifier.height(GuardianTheme.spacing.md))
+            SwitchRow(
+                title = "Also ring my first guardian",
+                description = if (!callOnEmergency) {
+                    "Your emergency codeword and a held SOS will text, but nobody's " +
+                        "phone will ring."
+                } else if (canPlaceCalls) {
+                    "On your emergency codeword or a held SOS only. " +
+                        "${contacts.minByOrNull { it.priority }?.name ?: "Your first guardian"} " +
+                        "is called right after the text goes out."
+                } else {
+                    "On your emergency codeword or a held SOS only. Without permission to " +
+                        "place calls I'll put a one-tap Call button on your lock screen " +
+                        "instead of dialling."
+                },
+                checked = callOnEmergency,
+                onCheckedChange = onCallOnEmergencyChange,
+            )
+        }
+
         AssuranceCard(
             icon = GuardianIcons.Shield,
             title = "They can't see you unless you need them",
-            body = "Guardians only receive your location while an alert is live.",
+            body = "Guardians only receive your location while an alert is live. Nothing " +
+                "here calls emergency services, and nothing in this app will ever tell " +
+                "you it has.",
         )
     }
 }

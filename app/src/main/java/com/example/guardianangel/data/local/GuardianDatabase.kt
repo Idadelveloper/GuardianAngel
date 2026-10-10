@@ -35,7 +35,7 @@ import androidx.sqlite.execSQL
         SafePlaceEntity::class,
         DisarmPinEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class GuardianDatabase : RoomDatabase() {
@@ -94,11 +94,25 @@ abstract class GuardianDatabase : RoomDatabase() {
         }
 
         /**
+         * Adds the "ring a guardian on an emergency" setting.
+         *
+         * Defaults to 1, the same default a fresh install gets, so an existing user is
+         * not quietly opted out of a protection a new user would have.
+         */
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+                connection.execSQL(
+                    "ALTER TABLE users ADD COLUMN callGuardianOnEmergency INTEGER NOT NULL DEFAULT 1"
+                )
+            }
+        }
+
+        /**
          * All migrations, in order. Each schema change adds one here rather than
          * bumping the version and hoping.
          */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
 
         @Volatile
         private var instance: GuardianDatabase? = null

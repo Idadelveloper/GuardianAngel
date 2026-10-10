@@ -42,6 +42,8 @@ import com.example.guardianangel.domain.model.initialsOf
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.repository.AccountRepository
 import com.example.guardianangel.domain.repository.AuthRepository
+import com.example.guardianangel.domain.model.SafeLocation
+import com.example.guardianangel.domain.repository.SafeLocationRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianOutlinedButton
@@ -78,10 +80,12 @@ fun SettingsHubRoute(
     cloudSync: CloudSync,
     currentUserId: suspend () -> String,
     authRepository: AuthRepository,
+    safeLocationRepository: SafeLocationRepository,
     onOpenWakeWord: () -> Unit,
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
     onOpenVoice: () -> Unit,
+    onOpenSafePlaces: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -96,6 +100,8 @@ fun SettingsHubRoute(
         .collectAsStateWithLifecycle(initialValue = null)
     val syncStatus by cloudSync.status
         .collectAsStateWithLifecycle(initialValue = SyncStatus.Idle)
+    val safePlaces by safeLocationRepository.observeLocations()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
 
     SettingsHubScreen(
         account = account,
@@ -108,6 +114,8 @@ fun SettingsHubRoute(
         onOpenCodewords = onOpenCodewords,
         onOpenGuardians = onOpenGuardians,
         onOpenVoice = onOpenVoice,
+        onOpenSafePlaces = onOpenSafePlaces,
+        safePlaces = safePlaces,
         onSaveProfile = { name, phone ->
             scope.launch { accountRepository.updateProfile(name, phone) }
         },
@@ -138,9 +146,11 @@ fun SettingsHubScreen(
     onOpenCodewords: () -> Unit,
     onOpenGuardians: () -> Unit,
     onOpenVoice: () -> Unit,
+    onOpenSafePlaces: () -> Unit,
     onSignOut: () -> Unit,
     modifier: Modifier = Modifier,
     onSaveProfile: (name: String, phone: String) -> Unit = { _, _ -> },
+    safePlaces: List<SafeLocation> = emptyList(),
 ) {
     // Says what will actually happen, including that it cannot happen yet.
     val cloudSubtitle = when (val status = syncStatus) {
@@ -300,9 +310,17 @@ fun SettingsHubScreen(
             )
             SettingsRow(
                 icon = GuardianIcons.MapPin,
-                title = "Location & safe havens",
-                subtitle = "Home geofence set · route lighting on",
-                onClick = { /* Not part of this build. */ },
+                title = "Home & safe places",
+                // Says what is actually stored. This read "Home geofence set · route
+                // lighting on" on every account, including ones with no home set and
+                // nothing to geofence, and the row did nothing when tapped.
+                subtitle = when {
+                    safePlaces.none { it.isHome } -> "No home set — tap to add one"
+                    safePlaces.size == 1 -> "Home set · add up to 2 more places"
+                    else -> "Home set · ${safePlaces.size - 1} other safe place" +
+                        if (safePlaces.size > 2) "s" else ""
+                },
+                onClick = onOpenSafePlaces,
             )
             SettingsRow(
                 icon = GuardianIcons.Broadcast,
@@ -471,7 +489,8 @@ private fun SettingsHubPreview() {
             syncStatus = SyncStatus.Unavailable,
             onBackUp = {},
             onOpenWakeWord = {},
-            onOpenCodewords = {}, onOpenGuardians = {}, onOpenVoice = {}, onSignOut = {},
+            onOpenCodewords = {}, onOpenGuardians = {}, onOpenVoice = {},
+            onOpenSafePlaces = {}, onSignOut = {},
         )
     }
 }

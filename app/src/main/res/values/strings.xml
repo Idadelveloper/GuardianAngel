@@ -135,4 +135,11 @@
     <string name="listening_notification_stop">Stand down</string>
     <string name="recording_notification_title">Angel is recording</string>
     <string name="recording_notification_body">Listening for your codewords. Tap to stop.</string>
+
+    <!-- Calling a guardian on the top alert tier -->
+    <string name="call_guardian_channel_name">Calling a guardian</string>
+    <string name="call_guardian_channel_description">Used only when an emergency alert needs to ring one of your guardians.</string>
+    <string name="call_guardian_title">Calling %1$s</string>
+    <string name="call_guardian_body">Tap to connect. Your guardians have already been texted your location.</string>
+    <string name="call_guardian_action">Call %1$s</string>
 </resources>

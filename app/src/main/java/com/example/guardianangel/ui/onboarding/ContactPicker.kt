@@ -1,11 +1,13 @@
 package com.example.guardianangel.ui.onboarding
 
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
@@ -23,32 +25,46 @@ data class PickedContact(
 /**
  * Picks a guardian from the phone's contacts.
  *
- * Uses `ActivityResultContracts.PickContact`, which hands back a single contact the user
- * chose in the system picker. The important property is that **it needs no permission**:
- * `READ_CONTACTS` would let the app read the entire address book, where the picker
- * returns exactly the one person the user selected, and the choosing happens in the
- * system UI rather than ours.
+ * Needs **no permission**: the system picker does the choosing, and the result grants a
+ * one-shot read on exactly the row the user selected. `READ_CONTACTS` would hand the app
+ * the entire address book, which for adding three guardians is impossible to justify —
+ * and it is one more prompt between someone and a working panic button.
  *
- * For an app whose whole pitch is that it does not take more than it needs, asking for
- * the full contacts permission to add three guardians would be hard to justify — and it
- * is one more permission prompt standing between someone and a working panic button.
+ * ## Why not `ActivityResultContracts.PickContact`
+ *
+ * That contract returns a **contact** URI, and a contact has any number of phone
+ * numbers — so `CommonDataKinds.Phone.NUMBER` is not a column on it. Querying it with
+ * phone projections threw, the failure was swallowed, and the name and number fields
+ * simply never filled in.
+ *
+ * Picking with `Phone.CONTENT_TYPE` instead returns the *phone row* the user chose. Both
+ * the name and the number are columns on it, it still needs no permission, and when a
+ * contact has several numbers the user picks which one rather than the app guessing.
  */
 @Composable
 fun rememberContactPicker(onPicked: (PickedContact) -> Unit): () -> Unit {
     val context = LocalContext.current
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickContact()
-    ) { uri ->
+    val launcher = rememberLauncherForActivityResult(PickPhoneNumber) { uri ->
         uri?.let { readContact(context, it)?.let(onPicked) }
     }
-    return remember(launcher) { { launcher.launch(null) } }
+    return remember(launcher) { { launcher.launch(Unit) } }
+}
+
+/** Opens the system picker filtered to phone numbers, returning the chosen row. */
+private object PickPhoneNumber : ActivityResultContract<Unit, Uri?>() {
+    override fun createIntent(context: Context, input: Unit): Intent =
+        Intent(Intent.ACTION_PICK).setType(ContactsContract.CommonDataKinds.Phone.CONTENT_TYPE)
+
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+        intent?.data?.takeIf { resultCode == Activity.RESULT_OK }
 }
 
 /**
- * Reads the name and first phone number behind a picked contact URI.
+ * Reads the name and number from the picked phone row.
  *
- * The picker grants a one-shot read on just this contact, so the query works without
- * `READ_CONTACTS` — but only for this URI, and only now.
+ * The picker grants a one-shot read on just this row, so the query works without
+ * `READ_CONTACTS` — but only for this URI, and only now, which is why the result is
+ * copied out immediately rather than the URI being stored.
  */
 private fun readContact(context: Context, uri: Uri): PickedContact? = try {
     context.contentResolver.query(

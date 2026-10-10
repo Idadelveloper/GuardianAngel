@@ -41,6 +41,7 @@ import com.example.guardianangel.ui.onboarding.WakeWordRoute
 import com.example.guardianangel.ui.settings.SettingsCodewordsRoute
 import com.example.guardianangel.ui.settings.SettingsGuardiansRoute
 import com.example.guardianangel.ui.settings.SettingsHubRoute
+import com.example.guardianangel.ui.settings.SettingsSafePlacesRoute
 import com.example.guardianangel.ui.settings.SettingsVoiceRoute
 import com.example.guardianangel.ui.settings.SettingsWakeWordRoute
 import com.example.guardianangel.ui.theme.GuardianTheme
@@ -229,6 +230,7 @@ private fun NavGraphBuilder.mainGraph(
                 contactsRepository = container.contactsRepository,
                 voiceProfiles = container.voiceProfileRepository,
                 activityRepository = container.activityRepository,
+                alertDispatcher = container.alertDispatcher,
                 permissions = container.permissionProbe,
                 angelOrchestrator = container.angelOrchestrator,
                 onOpenSession = { navController.navigate(Routes.sessionDetail(it)) },
@@ -268,10 +270,12 @@ private fun NavGraphBuilder.mainGraph(
                 cloudSync = container.cloudSync,
                 currentUserId = { container.currentUserId() },
                 authRepository = container.authRepository,
+                safeLocationRepository = container.safeLocationRepository,
                 onOpenWakeWord = { navController.navigate(Routes.SETTINGS_WAKE_WORD) },
                 onOpenCodewords = { navController.navigate(Routes.SETTINGS_CODEWORDS) },
                 onOpenGuardians = { navController.navigate(Routes.SETTINGS_GUARDIANS) },
                 onOpenVoice = { navController.navigate(Routes.SETTINGS_VOICE) },
+                onOpenSafePlaces = { navController.navigate(Routes.SETTINGS_SAFE_PLACES) },
                 // Back to the gate, not to onboarding: the account still exists and its
                 // setup is intact, so what is needed is a log-in, not a fresh wizard.
                 // Log-in rather than sign-up: the account and its setup are still
@@ -306,6 +310,7 @@ private fun NavGraphBuilder.stackedGraph(
     composable(Routes.SETTINGS_GUARDIANS) {
         SettingsGuardiansRoute(
             repository = container.contactsRepository,
+            accountRepository = container.accountRepository,
             onBack = navController::popBackStack,
         )
     }
@@ -324,6 +329,13 @@ private fun NavGraphBuilder.stackedGraph(
             onBack = navController::popBackStack,
             // Back to settings, not onward through the wizard.
             onContinue = navController::popBackStack,
+        )
+    }
+    composable(Routes.SETTINGS_SAFE_PLACES) {
+        SettingsSafePlacesRoute(
+            repository = container.safeLocationRepository,
+            locationTracker = container.locationTracker,
+            onBack = navController::popBackStack,
         )
     }
     composable(Routes.SETTINGS_VOICE) {

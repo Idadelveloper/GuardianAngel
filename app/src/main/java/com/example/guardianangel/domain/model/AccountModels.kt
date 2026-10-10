@@ -17,6 +17,8 @@ data class UserProfile(
     val phoneNumber: String,
     val isPhoneVerified: Boolean = false,
     val shieldActive: Boolean = true,
+    /** Whether a top-tier alert also rings the first guardian. See `EmergencyCallPolicy`. */
+    val callGuardianOnEmergency: Boolean = true,
 ) {
     val firstName: String get() = fullName.substringBefore(' ')
 }

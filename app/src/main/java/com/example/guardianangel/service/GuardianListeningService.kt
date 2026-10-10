@@ -95,6 +95,9 @@ class GuardianListeningService : Service() {
     /** Writes the live session to storage. Resolved lazily: the container outlives us. */
     private val recorder: SessionRecorder get() = appContainer.sessionRecorder
 
+    /** The single path an alert takes, shared with the SOS button. */
+    private val alerts get() = appContainer.alertDispatcher
+
     /** Wall-clock of the last thing worth noticing, for the inactivity timeout. */
     @Volatile
     private var lastSignificantEvent = 0L
@@ -262,7 +265,7 @@ class GuardianListeningService : Service() {
                         // The cheap tier only ever escalates to Danger. Emergency stays
                         // reserved for the user's own emergency codeword: calling the
                         // police is not a call a heuristic should make unprompted.
-                        guardian.dispatchAlert(CodewordTier.Danger)
+                        alerts.dispatch(CodewordTier.Danger)
                     }
                 },
                 onTranscriptDecoded = { chunk, _, peakDb ->
@@ -324,6 +327,8 @@ class GuardianListeningService : Service() {
                 wakePhrase = effectivePhrase,
                 voiceprint = voiceprint,
                 requireVoiceMatch = gateOnVoice,
+                // Her Settings choice, which until now reached nothing.
+                sensitivity = wakeWord.sensitivity,
             )
             listening.setDetectorReady(ready)
 
@@ -409,11 +414,14 @@ class GuardianListeningService : Service() {
                     CodewordTier.Safe -> {
                         // Said with nothing pending: she is telling her circle she is
                         // fine, which ends the session rather than starting anything.
-                        guardian.dispatchAlert(CodewordTier.Safe)
+                        alerts.dispatch(CodewordTier.Safe)
                         stopListening()
                     }
-                    CodewordTier.Caution -> Log.i(TAG, "Caution codeword: recording continues")
-                    else -> guardian.dispatchAlert(decision.tier)
+                    CodewordTier.Caution -> {
+                        Log.i(TAG, "Caution codeword: recording continues")
+                        alerts.dispatch(CodewordTier.Caution)
+                    }
+                    else -> alerts.dispatch(decision.tier)
                 }
             }
 
@@ -433,7 +441,9 @@ class GuardianListeningService : Service() {
 
             is CodewordGate.Decision.Cancelled -> {
                 Log.i(TAG, "${decision.tier} cancelled by the safe word")
-                guardian.dispatchAlert(CodewordTier.Safe)
+                // The all-clear goes to whoever was alerted. People who were woken are
+                // owed the follow-up more than they were owed the original.
+                alerts.dispatch(CodewordTier.Safe)
             }
 
             is CodewordGate.Decision.Withheld -> {
@@ -467,8 +477,9 @@ class GuardianListeningService : Service() {
                 codewordGate.dueForDispatch()?.let { pending ->
                     codewordGate.consumePending()
                     Log.i(TAG, "Dispatching held ${pending.tier}")
-                    guardian.dispatchAlert(pending.tier)
-                    recorder.noteGuardiansNotified(listOf("circle"))
+                    // The dispatcher records who was actually reached; the placeholder
+                    // "circle" that used to be written here was not a guardian.
+                    alerts.dispatch(pending.tier)
                     noteActivity()
                 }
 
@@ -518,6 +529,8 @@ class GuardianListeningService : Service() {
         teardownScope.launch {
             runCatching { recorder.finish() }
             codewordGate.reset()
+            // So the next session can alert again at a tier this one already used.
+            runCatching { alerts.resetForNewSession() }
         }
         // The notification and the service go immediately — the user asked to stand down
         // and should see that happen. Freeing the models trails behind, in order.

@@ -23,6 +23,45 @@
     <!-- Location accompanies an alert so guardians know where to go. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!--
+      Sends the guardian alert.
+
+      A restricted permission on Google Play. The policy lists "Physical safety/emergency
+      alerts to send SMS" as an eligible exception, which has to be declared through the
+      Permissions Declaration Form in Play Console before release and is reviewed.
+
+      The app works without it: SmsGuardianNotifier falls back to opening the messaging
+      app with the alert pre-filled, which needs no permission but needs a tap. The UI
+      says which of the two she has rather than implying a silent alert she will not get.
+    -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+
+    <!--
+      Rings one guardian on the top alert tier, and only then. The number is one the user
+      saved herself; nothing here dials an emergency service.
+
+      Optional at runtime. Without it the call notification falls back to ACTION_DIAL,
+      which opens the dialler with the number ready and needs no permission at all — a
+      tap instead of a ring, which TelephonyGuardianCaller reports as a different
+      outcome rather than passing off as a placed call.
+    -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+
+    <!--
+      Puts the "Call <guardian>" button on the lock screen when an emergency alert fires
+      with the phone in a pocket. Since Android 14 the system grants this automatically
+      only to dialler and alarm apps, so the code asks canUseFullScreenIntent() and
+      degrades to a heads-up banner rather than assuming it holds.
+    -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
+    <!--
+      Not required. Declaring SEND_SMS otherwise implies a modem, which would stop the
+      app installing on tablets and Chromebooks — devices a guardian might well use, and
+      where everything except the silent-SMS path still works.
+    -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 

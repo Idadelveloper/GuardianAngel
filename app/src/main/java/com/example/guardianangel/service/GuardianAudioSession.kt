@@ -7,6 +7,7 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.util.Log
 import com.example.guardianangel.audio.AudioEvent
+import com.example.guardianangel.domain.model.ListeningSensitivity
 import com.example.guardianangel.audio.HeuristicThreatAssessor
 import com.example.guardianangel.audio.SAMPLE_RATE
 import com.example.guardianangel.audio.SherpaSpeakerIdentifier
@@ -84,7 +85,14 @@ class GuardianAudioSession(
     /** Called when audio acoustic events are tagged. */
     private val onEventsDetected: ((List<AudioEvent>, Int?) -> Unit)? = null,
 ) {
-    private val detector = SherpaWakeWordDetector(context)
+    /**
+     * Built in [prepare], once the user's sensitivity is known.
+     *
+     * The threshold is a construction-time property of the spotter, so this cannot be a
+     * field initialised with a default — doing that is what left the Settings control
+     * disconnected.
+     */
+    private var detector = SherpaWakeWordDetector(context)
     private val transcriber = SherpaTranscriber(context)
     private val tagger = YamnetAudioTagger(context)
     private val speakers = SherpaSpeakerIdentifier(context)
@@ -118,6 +126,21 @@ class GuardianAudioSession(
     private var taggerFilled = 0
 
     /**
+     * Loudest sample in the most recent buffer, 0f..1f.
+     *
+     * Exposed because "the wake word does not work" has two completely different causes
+     * — the microphone is hearing nothing, or it is hearing fine and the spotter is not
+     * firing — and from outside there is no way to tell them apart.
+     */
+    @Volatile
+    private var inputLevel = 0f
+    private var buffersSinceLog = 0
+    private var peakSinceLog = 0f
+
+    /** The loudest thing the microphone has picked up in the last buffer. */
+    fun lastInputLevel(): Float = inputLevel
+
+    /**
      * Loads the models. Returns false when the wake-word model is missing.
      *
      * @param voiceprint the enrolled user's embedding, or null if she has not enrolled.
@@ -129,7 +152,9 @@ class GuardianAudioSession(
         wakePhrase: String,
         voiceprint: FloatArray? = null,
         requireVoiceMatch: Boolean = false,
+        sensitivity: ListeningSensitivity = ListeningSensitivity.Balanced,
     ): Boolean {
+        detector = SherpaWakeWordDetector(context, sensitivity)
         val detectorReady = detector.load()
         if (detectorReady && !detector.setWakePhrase(wakePhrase)) {
             Log.w(TAG, "Wake phrase \"$wakePhrase\" is not expressible in the model vocabulary")
@@ -270,8 +295,20 @@ class GuardianAudioSession(
      * nothing but read bytes and hand them here.
      */
     internal fun route(buffer: FloatArray, taggerWindow: FloatArray) {
+        inputLevel = buffer.maxOfOrNull { kotlin.math.abs(it) } ?: 0f
+
         when (_state.value.phase) {
             SessionPhase.Waiting -> {
+                // One line every few seconds while armed. "It never heard me" and "it
+                // heard me and did not fire" are completely different faults, and
+                // without a level in the log there is no way to tell them apart.
+                peakSinceLog = maxOf(peakSinceLog, inputLevel)
+                if (++buffersSinceLog >= LEVEL_LOG_EVERY) {
+                    buffersSinceLog = 0
+                    Log.i(TAG, "listening — peak %.3f".format(peakSinceLog))
+                    peakSinceLog = 0f
+                }
+
                 // Before matching, so the phrase is in the ring by the time a detection
                 // comes back.
                 appendPreroll(buffer)
@@ -448,6 +485,9 @@ class GuardianAudioSession(
         const val BUFFER_SAMPLES = SAMPLE_RATE / 10
         /** Speaker-labelling windows, the same length for the same reason. */
         const val SPEAKER_WINDOW_SAMPLES = SherpaSpeakerIdentifier.EMBED_WINDOW_SAMPLES
+
+        /** 100 ms buffers, so this is one log line roughly every 5 s. */
+        const val LEVEL_LOG_EVERY = 50
 
         const val TRANSCRIPT_WINDOW = 20
         const val EVENT_WINDOW = 12

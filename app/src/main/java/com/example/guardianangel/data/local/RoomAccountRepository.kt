@@ -60,6 +60,7 @@ class RoomAccountRepository(
                             phoneNumber = user.phoneNumber.orEmpty(),
                             isPhoneVerified = !user.phoneNumber.isNullOrBlank(),
                             shieldActive = user.shieldActive,
+                            callGuardianOnEmergency = user.callGuardianOnEmergency,
                         ),
                         permissions = perms,
                         voiceProfile = voice.toModel(),
@@ -96,6 +97,17 @@ class RoomAccountRepository(
             existing.copy(
                 displayName = fullName.trim().ifBlank { existing.displayName },
                 phoneNumber = phoneNumber.trim().ifBlank { null },
+                updatedAt = System.currentTimeMillis(),
+            )
+        )
+    }
+
+    override suspend fun setCallGuardianOnEmergency(enabled: Boolean) {
+        val id = currentUser.requireId()
+        val existing = userDao.find(id) ?: return
+        userDao.upsert(
+            existing.copy(
+                callGuardianOnEmergency = enabled,
                 updatedAt = System.currentTimeMillis(),
             )
         )

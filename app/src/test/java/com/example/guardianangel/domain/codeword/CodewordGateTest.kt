@@ -205,6 +205,71 @@ class CodewordGateTest {
         assertTrue(say("lighthouse") is CodewordGate.Decision.Holding)
     }
 
+    // --- Imperfect transcripts -------------------------------------------------------
+    //
+    // The text being matched is a machine transcript of someone speaking, possibly
+    // frightened and outdoors. Requiring an exact string means the codeword works in a
+    // quiet room and fails in the situation it exists for.
+
+    @Test
+    fun `a one-word phrase split in two is still heard`() {
+        // Far and away the most common transcription of "lighthouse".
+        assertTrue(say("it's the light house on the corner") is CodewordGate.Decision.Holding)
+    }
+
+    @Test
+    fun `a small misspelling is forgiven`() {
+        assertTrue(say("lighthous") is CodewordGate.Decision.Holding)
+    }
+
+    @Test
+    fun `a dropped letter is forgiven`() {
+        assertTrue(say("lighthouse".replace("t", "")) is CodewordGate.Decision.Holding)
+    }
+
+    @Test
+    fun `an unrelated word of similar length does not fire`() {
+        // "warehouse" is four edits from "lighthouse" — well outside tolerance.
+        assertEquals(CodewordGate.Decision.None, say("we walked past the warehouse"))
+    }
+
+    @Test
+    fun `ordinary speech does not trip the fuzzy matcher`() {
+        // The risk of fuzzy matching is firing on conversation. These are the kinds of
+        // sentence the transcript is full of.
+        listOf(
+            "I'm nearly home now",
+            "the weather is lovely tonight",
+            "can you hear me okay",
+            "sorry I missed your call earlier",
+            "there's a light on upstairs",
+            "my house is just around the corner",
+        ).forEach { sentence ->
+            assertEquals(
+                "\"$sentence\" should not fire a codeword",
+                CodewordGate.Decision.None,
+                gate.evaluate(sentence, true, codewords),
+            )
+        }
+    }
+
+    @Test
+    fun `short phrases get no fuzzy tolerance`() {
+        // At four characters almost any word is one edit from any other, so a short
+        // codeword is matched exactly or not at all.
+        val shortWord = listOf(Codeword("1", CodewordTier.Danger, "fig"))
+        assertEquals(CodewordGate.Decision.None, gate.evaluate("fog", true, shortWord))
+        assertTrue(gate.evaluate("fig", true, shortWord) is CodewordGate.Decision.Holding)
+    }
+
+    @Test
+    fun `a two-word phrase survives a wrong word ending`() {
+        val two = listOf(Codeword("1", CodewordTier.Danger, "yellow submarine"))
+        assertTrue(
+            gate.evaluate("yellow submarines", true, two) is CodewordGate.Decision.Holding
+        )
+    }
+
     @Test
     fun `matching is case insensitive`() {
         assertTrue(say("LIGHTHOUSE") is CodewordGate.Decision.Holding)

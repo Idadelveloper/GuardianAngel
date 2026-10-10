@@ -2,6 +2,7 @@ package com.example.guardianangel.audio
 
 import android.content.Context
 import android.util.Log
+import com.example.guardianangel.domain.model.ListeningSensitivity
 import com.k2fsa.sherpa.onnx.FeatureConfig
 import com.k2fsa.sherpa.onnx.KeywordSpotter
 import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
@@ -42,14 +43,38 @@ private const val TAG = "SherpaWakeWord"
 class SherpaWakeWordDetector(
     private val context: Context,
     /**
-     * Raised to make the spotter more eager. Positive values bias decoding toward the
-     * keyword, which is the right direction here: a missed wake word during an assault
-     * costs far more than a spurious recording the user cancels with one tap.
+     * How hard the spotter tries.
+     *
+     * Previously fixed, which meant the "How closely I listen" control in Settings —
+     * Low, Balanced, Whisper — was wired to nothing at all. A user who could not be
+     * heard would reasonably turn sensitivity up and get no change whatsoever.
      */
-    private val keywordsScore: Float = 2.0f,
-    /** Minimum acoustic probability before a detection is reported. */
-    private val keywordsThreshold: Float = 0.25f,
+    private val sensitivity: ListeningSensitivity = ListeningSensitivity.Balanced,
 ) {
+    /**
+     * Bias toward reporting the keyword.
+     *
+     * Deliberately eager across the board. The costs are not symmetric: a spurious
+     * recording is cancelled with one tap, while a missed wake word is the feature not
+     * existing at the only moment it mattered.
+     */
+    private val keywordsScore: Float
+        get() = when (sensitivity) {
+            ListeningSensitivity.Low -> 1.5f
+            ListeningSensitivity.Balanced -> 2.5f
+            ListeningSensitivity.Whisper -> 4.0f
+        }
+
+    /** Minimum acoustic probability before a detection is reported. */
+    private val keywordsThreshold: Float
+        get() = when (sensitivity) {
+            ListeningSensitivity.Low -> 0.30f
+            ListeningSensitivity.Balanced -> 0.20f
+            // Low enough to catch a phrase said under the breath, at the cost of more
+            // false wakes. That is the trade the user asked for by choosing it.
+            ListeningSensitivity.Whisper -> 0.10f
+        }
+
     private var spotter: KeywordSpotter? = null
     private var stream: OnlineStream? = null
     private var tokenizer: SentencePieceTokenizer? = null
@@ -89,7 +114,11 @@ class SherpaWakeWordDetector(
             )
             spotter = KeywordSpotter(context.assets, config)
             tokenizer = SentencePieceTokenizer.fromAssets(context.assets, "$MODEL_DIR/bpe.model")
-            Log.i(TAG, "Keyword spotter loaded")
+            Log.i(
+                TAG,
+                "Keyword spotter loaded (sensitivity=$sensitivity, " +
+                    "score=$keywordsScore, threshold=$keywordsThreshold)",
+            )
             true
         } catch (e: Exception) {
             // Missing assets are the expected case in a build without models.

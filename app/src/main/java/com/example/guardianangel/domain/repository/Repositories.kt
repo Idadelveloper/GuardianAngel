@@ -45,6 +45,13 @@ interface AccountRepository {
     suspend fun setWhisperDetection(enabled: Boolean)
     suspend fun setNoiseCancellation(enabled: Boolean)
     suspend fun setDisarmPin(pin: String)
+
+    /**
+     * Turns calling a guardian on an emergency alert on or off.
+     *
+     * The text always goes out; this only governs the phone ringing.
+     */
+    suspend fun setCallGuardianOnEmergency(enabled: Boolean)
     suspend fun advanceOnboarding(step: OnboardingStep)
     suspend fun completeOnboarding()
     suspend fun signOut()

@@ -200,17 +200,15 @@ walks are not stretched, and coloured segment by segment by the score at that mo
 
 When a key *is* present:
 
-- **List rows use lite mode** (`GoogleMapOptions().liteMode(true)`). It renders a bitmap
-  rather than a GL surface, which is what makes one per row affordable — the use case
-  Google documents it for. Lite mode's default tap launches the Maps app, so the whole
-  preview is wrapped in its own click target instead.
-- **The detail map has every gesture disabled.** It sits in a vertical scroll, and with
-  panning on, a drag meant for the page moved the camera off the route with no way back.
-  "Open in Maps" is the way out.
+- **List rows use lite mode** (`liteMode(true)`): a bitmap, not a GL surface, which is
+  what makes one per row affordable. Its default tap opens the Maps app, so the preview
+  is wrapped in its own click target.
+- **The detail map has every gesture disabled.** It sits in a vertical scroll, and a drag
+  meant for the page moved the camera off the route with no way back. "Open in Maps" is
+  the way out.
 - **Tapping a marker selects the incident row below it.** `MarkerInfoWindow` rasterises
   Compose content and does not reliably draw inside a clipped non-interactive map; the
-  list is also the surface a screen reader can reach. The marker click returns `false`
-  so the bubble still shows where it can.
+  list is also what a screen reader can reach.
 
 Incidents are **derived on read** by `TrailBuilder`, never stored: what counts as notable
 changes as the heuristics improve, and a session recorded last month should benefit from
@@ -232,9 +230,94 @@ over the top of the screen says "emergency", and recording often is not one.
 ### A recording left running stands itself down
 
 The service watchdog stops a session after 30 minutes with no speech and no danger sound.
-A recording forgotten in a bag is a battery drain and a privacy problem, and the user who
-forgot it is least likely to notice. Speech and danger events both reset the timer, so an
-incident cannot time out mid-way.
+A recording forgotten in a bag is a battery and privacy problem, and the user who forgot
+it is least likely to notice. Speech and danger events reset the timer, so an incident
+cannot time out mid-way.
+
+### Alerting a guardian goes through one path
+
+The SOS hold and a spoken codeword are the same event. They used to reach different code
+— the button only flipped in-memory UI state — so a duress hold looked like an alert and
+sent nothing. Both now call `AlertDispatcher.dispatch(tier)`, which composes, sends,
+records the outcome in the session and updates UI state. **Never call `dispatchAlert`
+directly from a trigger.**
+
+`GuardianNotificationAgent` owns the judgement: Caution reaches the top guardian only
+(waking five people because a recording started teaches them to ignore the next one),
+Danger and Emergency reach everyone in priority order, an already-sent tier is suppressed
+unless it escalated, and Safe is never suppressed — the people woken are owed the
+all-clear. A *failed* send is not remembered as sent, or one failure would silence the
+rest of the session. `GuardianNotificationAgentTest` pins it.
+
+`SmsGuardianNotifier` uses SMS: it works on one bar with no data, needs no app on the
+receiving end, and lands on a lock screen. **`SEND_SMS` is restricted on Google Play**;
+the policy lists "Physical safety/emergency alerts to send SMS" as an eligible exception,
+declared through the Permissions Declaration Form before release. Without it the
+messaging app opens pre-filled — no permission, but a tap — so `canSendSilently` drives
+copy saying which she has. `telephony` stays `required="false"` or the app will not
+install on tablets.
+
+`AlertComposer` writes the message: who, then where, then why. The location is a plain
+`https://www.google.com/maps/...` link — `geo:` URIs are not tappable in most SMS
+clients. Alarming lines are **quoted, never paraphrased**: a summary softening "he grabbed
+my arm" into "an altercation" has edited evidence. A missing location is stated, not
+omitted.
+
+**No alert claims emergency services have been called.** Nothing in the app dials one,
+and no message says one was dialled. An automated 911 call on a false trigger is a
+criminal false report in much of the US, and a guardian told help is already coming is a
+guardian who stops calling it themselves — which is the one sentence that turns a working
+alert into a fatal one.
+
+### Emergency rings one guardian; every other tier only texts
+
+`EmergencyCallPolicy` is pure and decides *whether*: Emergency only, one guardian (lowest
+`priority` with a number), never twice in a session, off entirely if the user cleared
+`users.callGuardianOnEmergency`. Caution ringing a phone would get the feature switched
+off within a week, and then nothing rings on the night it matters.
+
+`TelephonyGuardianCaller` does it, and the hard part is that dialling means **starting an
+activity**, which Android forbids an app with no visible window — exactly the locked-in-a-
+pocket case this exists for, and it fails silently with no exception to catch. So:
+app visible → `ACTION_CALL` directly; app backgrounded → a max-priority call notification
+whose tap dials, since a notification tap is a documented exception to the background
+rule. A full-screen intent is attached only when `canUseFullScreenIntent()` agrees —
+Android 14 grants that automatically to dialler and alarm apps only.
+
+`Outcome.Dialling` and `Outcome.AwaitingTap` are **never flattened into one**. A posted
+notification is not a placed call, only `Dialling` sets the session's already-called flag,
+and the session note for a tap says "tap to connect". The call is placed *after* the text,
+which carries the location and survives an unanswered phone. `AlertDispatcherCallTest`
+pins all of it.
+
+`TranscriptSummariser` is deterministic on purpose: an on-device LLM costs seconds and
+~1 GB of RAM, and a cloud call needs connectivity that fails exactly where this matters.
+`AiTranscriptSummariser` is the seam for a model-written version — it should enrich the
+stored session *after* the alert, never block it.
+
+### Map pins are drawn, anchored, and never emoji
+
+`GuardianMapMarkers` draws every non-Angel pin. The default `defaultMarker()` plus an
+emoji in the title made a police station, a cluster of reported assaults and a saved safe
+place look identical until tapped — on a safety map that is the whole product failing.
+Hazards carry their count and grow slightly with it: "3 reported" and "40 reported" are
+different places. Bitmaps are cached per (kind, badge, scale) — a map re-renders on every
+camera move.
+
+Always pass `anchor = PIN_ANCHOR`, which comes from `GuardianMapMarkers.ANCHOR_X/Y` and is
+derived from the drawing geometry. Without it the SDK centres the bitmap on the
+coordinate and every pin sits half its height north of the thing it marks.
+
+`AngelLocationMarker` holds **one** `MarkerState` for the life of the screen and
+interpolates its position toward each fix, so Angel walks with the user instead of
+vanishing and rematerialising once a second; a jump over ~180 m is snapped, because
+gliding across a city lies about where she was in between. Tapping her pulses the bitmap
+and shows `AngelWhereAmI` — a card in the top overlay, not a map info window, which would
+be unreadable at low zoom and off-screen whenever the camera follows her.
+
+Anything pinned to the bottom of the map must clear `BottomBarClearance`, and more while
+a route sheet is up. The floating navigation draws over map content: a sheet at the bottom
+edge is half-hidden behind it, and one drawn on top of it swallows taps meant for a tab.
 
 ### Stubs must never fake success
 
@@ -314,10 +397,10 @@ codewords is a safety regression, not an inconvenience. Transcripts, the voicepr
 the disarm PIN are **never uploaded**; `CloudSync` uses hand-written maps so a new column
 cannot start syncing by accident.
 
-`GuardianRepository`, `ActivityRepository` and `RouteRepository` are **still in-memory
-fakes**, so the Home snapshot is sample content. This is why the "Not set up yet" card
-reads codewords and guardians from their own Room repositories rather than from the
-snapshot — do not "simplify" it to use the snapshot.
+`GuardianRepository` and `RouteRepository` are **still in-memory fakes**, so the Home
+snapshot is sample content. This is why the "Not set up yet" card reads codewords and
+guardians from their own Room repositories rather than from the snapshot — do not
+"simplify" it to use the snapshot.
 
 ## Navigation
 
@@ -325,7 +408,7 @@ One `NavHost`; routes are constants in `Routes`; tabs in `TopLevelTab`. Three sh
 
 - **Onboarding** slides horizontally with no bottom bar — a tab bar invites the user out
   of a wizard that must complete in order.
-- **Main tabs** cross-fade; a slide would imply a hierarchy that peers do not have.
+- **Main tabs** cross-fade; a slide would imply a hierarchy peers do not have.
 - **Stacked sub-screens** slide in from the right.
 
 The bottom bar lives in the NavHost, not in screens, so exactly one place decides when it
@@ -343,9 +426,9 @@ every `stepLabel` and `progress`. A skipped step must resurface: `GuardianCapabi
 `guardianSetup()` derive what still does not work from live state, and `SetupNeededCard`
 shows the most consequential gap with one button that fixes it.
 
-Settings recalibration uses `Routes.SETTINGS_VOICE_RECALIBRATE`, a separate destination
-from the onboarding `VOICE_CALIBRATION`, because the two differ in where Continue goes —
-reusing the onboarding route dropped the user into the rest of the wizard.
+Settings recalibration uses `Routes.SETTINGS_VOICE_RECALIBRATE`, separate from the
+onboarding `VOICE_CALIBRATION`: reusing the onboarding route dropped the user into the
+rest of the wizard.
 
 ## Design system
 
@@ -466,34 +549,32 @@ defaults and do not infer them.
 
 ## Current state and what is next
 
-Done: the whole UI and navigation; the Angel mascot; Room with twelve tables, exported
-schemas and Keystore-encrypted secrets; anonymous accounts with email/password and phone
-linking ready for Firebase; opt-in cloud backup that cannot upload transcripts; the full
-speech cascade wired and **proven on device** — detection on recorded speech, no false
-accept on unrelated speech, the speaker gate in both directions, enrolment producing a
-usable voiceprint, re-arming after release, manual recording, and wake-word persistence
-through the real Room store; **Berkeley safest-route prototype** complete with live Google
-Maps Compose screen, fused GPS tracking, Angel mascot live marker with mood synchronization
-and floating text status bubble, Places Autocomplete destination search, Home & Safe Location
-Room persistence (`SafePlaceDao`) with geofence hysteresis (80m enter, 105m exit) and Sanctuary
-semantics (score 100% at Home unless under active emergency override), deterministic multi-factor
-route safety evaluation over official Berkeley BPD/UCPD spatial cells and NWS weather, and privacy-preserving
-markers with legend. Documents: `docs/BERKELEY_MAPS_SETUP.md`, `docs/BERKELEY_DATA_MANIFEST.md`,
-`docs/BERKELEY_INGESTION_REPORT.md`.
+Done: the UI, navigation and auth gate; the Angel mascot; Room (v4, exported schemas,
+Keystore-encrypted secrets, real migrations); accounts ready for Firebase; opt-in cloud
+backup that cannot upload transcripts; the speech cascade wired and **proven on device**
+(detection, no false accept, the speaker gate both ways, enrolment, re-arming, manual
+recording, persistence); real session recording with transcripts, breadcrumb trails,
+derived incidents, analytics, export and deletion; the Berkeley safest-route map with live
+Maps Compose, fused GPS, themed pins, Places search, home/safe-place persistence with
+geofence hysteresis and Sanctuary semantics, and route scoring over BPD/UCPD cells and
+NWS weather; guardian alerting by SMS with an emergency call to the first guardian. See
+`docs/BERKELEY_*.md`.
 
 Next, roughly in order:
 
 1. **Tune detection thresholds against real speech.** Only Ida can do this — nothing
-   automated can tell you how the wake word behaves with her voice, at arm's length,
-   through a pocket, with a television on, or whether the speaker threshold is right for
-   two real people. She has not yet said the wake word aloud to an armed build.
+   automated can tell you how the wake word behaves with her voice, through a pocket, with
+   a television on. She has not yet said it aloud to an armed build.
 2. **Tier 3 reasoning** — an LLM assessor over text for the ambiguous 0.30–0.60 band.
-3. **Room-back `GuardianRepository`, `ActivityRepository`, `RouteRepository`** so recorded
-   sessions survive the process. The tables exist; only the implementations are missing.
-4. **APK size** — 240 MB with models bundled. Needs first-run download or Play Asset
-   Delivery before any release.
-5. **Localise** the copy added with the Angel screens, which is still inline in the
-   composables rather than in `strings.xml`.
+3. **Room-back `GuardianRepository` and `RouteRepository`.** `ActivityRepository` is done;
+   Home still reads `FakeGuardianRepository`, so its mascot and score bypass
+   `GuardianSafetyStateResolver` that Map already uses.
+4. **Navigation polish** — path selection does not jump to Home, no animation to the
+   selected path, no Angel chat-bubble directions, no persistent navigation when the app
+   is backgrounded.
+5. **APK size** — 269 MB with models bundled. Needs first-run download or Play Asset
+   Delivery before any release. It no longer fits on a near-full emulator.
+6. **Localise** the inline Angel copy into `strings.xml`.
 
 Firebase code is complete but **no Firebase project exists yet** — Ida has to create it
 and drop in `google-services.json`. The app is designed to work fully without it

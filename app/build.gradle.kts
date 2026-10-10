@@ -141,6 +141,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // ProcessLifecycleOwner: the only reliable answer to "may I start an activity",
+    // which decides whether an emergency call can dial directly or must be tapped.
+    implementation(libs.androidx.lifecycle.process)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.room.testing)

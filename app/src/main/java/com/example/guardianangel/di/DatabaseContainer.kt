@@ -202,6 +202,53 @@ class DatabaseAppContainer(
 
     override val crimeDataService = com.example.guardianangel.data.crime.CrimeDataService()
     override val locationTracker = com.example.guardianangel.data.platform.LocationTracker(context)
+    /**
+     * The agent that reaches a human, and the one path to it.
+     *
+     * Built here so the SOS hold and a spoken codeword share a single notifier, a single
+     * de-duplication state and a single place that writes the outcome into the session.
+     * Two instances would mean an alert from the button and one from a codeword could
+     * both fire for the same incident.
+     */
+    val notificationAgent = com.example.guardianangel.agent.GuardianNotificationAgent(
+        com.example.guardianangel.data.platform.SmsGuardianNotifier(context)
+    )
+
+    override val alertDispatcher = com.example.guardianangel.domain.alert.AlertDispatcher(
+        notificationAgent = notificationAgent,
+        contacts = contactsRepository,
+        guardianRepository = guardianRepository,
+        recorder = sessionRecorder,
+        profileName = {
+            accountRepository.observeAccount().first().profile?.fullName.orEmpty()
+        },
+        currentLocation = {
+            locationTracker.getCurrentLocation()?.let { point ->
+                com.example.guardianangel.domain.alert.AlertDispatcher.LocationFix(
+                    latitude = point.latitude,
+                    longitude = point.longitude,
+                    placeLabel = runCatching { locationTracker.reverseGeocode(point) }.getOrNull(),
+                )
+            }
+        },
+        sessionEntries = {
+            // The live session's lines, so the alert quotes what was just said rather
+            // than describing the situation in the abstract.
+            val id = sessionRecorder.activeSessionId
+            if (id.isNullOrBlank()) {
+                emptyList()
+            } else {
+                runCatching {
+                    activityRepository.observeSession(id).first()?.entries
+                }.getOrNull().orEmpty()
+            }
+        },
+        caller = com.example.guardianangel.data.platform.TelephonyGuardianCaller(context),
+        callingEnabled = {
+            accountRepository.observeAccount().first().profile?.callGuardianOnEmergency ?: false
+        },
+    )
+
     override val angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator by lazy {
         com.example.guardianangel.agent.AngelAgentOrchestrator(crimeDataService, scope)
     }

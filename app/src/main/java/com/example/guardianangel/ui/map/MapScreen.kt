@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -83,6 +84,7 @@ import com.example.guardianangel.ui.components.BottomBarClearance
 import com.example.guardianangel.ui.components.GuardianPrimaryButton
 import com.example.guardianangel.ui.home.components.TonalPill
 import com.example.guardianangel.ui.icons.GuardianIcons
+import com.example.guardianangel.ui.map.components.AngelLocationCallout
 import com.example.guardianangel.ui.map.components.AngelStatusBubble
 import com.example.guardianangel.ui.map.components.HomeConfigDialog
 import com.example.guardianangel.ui.map.components.MapLegendAndFiltersDialog
@@ -106,6 +108,7 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -318,6 +321,12 @@ fun MapScreen(
     var filterState by remember { mutableStateOf(MarkerFilterState()) }
     var statusBubbleDismissed by remember { mutableStateOf(false) }
 
+    // What Angel said when she was last tapped, and a counter that re-runs her pulse. The
+    // counter is separate because tapping her twice in the same place must animate twice,
+    // and an identical callout would not re-trigger a keyed effect.
+    var angelCallout by remember { mutableStateOf<AngelWhereAmI.Callout?>(null) }
+    var angelPulse by remember { mutableStateOf(0) }
+
     val scope = rememberCoroutineScope()
 
     // Default map center: user position or downtown Berkeley
@@ -378,23 +387,32 @@ fun MapScreen(
                 mapType = MapType.NORMAL,
                 isMyLocationEnabled = false,
             ),
+            // Tapping the map itself puts the sheet and the callout away, the way every
+            // map app behaves. Without it the only exit was the close button.
+            onMapClick = {
+                selectedFeature = null
+                angelCallout = null
+            },
             onMapLongClick = { latLng ->
                 // Long press opens Home configuration for tapped coordinate
                 showHomeDialog = true
             },
         ) {
-            // Live Angel Mascot Marker
+            // Live Angel Mascot Marker — one state for the life of the screen, so she
+            // walks with the user instead of reappearing at each new fix.
             if (currentLocation != null) {
-                val angelBitmap = AngelMarkerRenderer.getMarkerBitmapDescriptor(resolvedState.mood)
-                Marker(
-                    state = rememberMarkerState(currentLocation.latitude, currentLocation.longitude),
-                    icon = angelBitmap,
-                    title = "Angel",
+                AngelLocationMarker(
+                    location = currentLocation,
+                    mood = resolvedState.mood,
                     snippet = resolvedState.heroHeadline,
-                    onClick = {
-                        statusBubbleDismissed = false
-                        true
+                    onTap = {
+                        angelCallout = AngelWhereAmI.describe(
+                            locationState = resolvedState.locationState,
+                            accuracyMeters = userLocationSnapshot?.accuracyMeters,
+                        )
+                        angelPulse += 1
                     },
+                    pulseKey = angelPulse,
                 )
             }
 
@@ -402,8 +420,10 @@ fun MapScreen(
             if (homeLocation != null) {
                 Marker(
                     state = rememberMarkerState(homeLocation.point.latitude, homeLocation.point.longitude),
-                    title = "🏡 ${homeLocation.name}",
-                    snippet = "Designated Sanctuary Base (Score 100%)",
+                    icon = GuardianMapMarkers.pin(GuardianMapMarkers.Kind.Home),
+                    anchor = PIN_ANCHOR,
+                    title = homeLocation.name,
+                    snippet = "Your home — score stays at 100% inside",
                     onClick = {
                         selectedFeature = SelectedMapFeature.HomeFeature(homeLocation)
                         true
@@ -415,8 +435,10 @@ fun MapScreen(
             safeLocations.filterNot { it.isHome }.forEach { safeLoc ->
                 Marker(
                     state = rememberMarkerState(safeLoc.point.latitude, safeLoc.point.longitude),
-                    title = "🛡️ ${safeLoc.name}",
-                    snippet = "Saved Safe Location (${safeLoc.radiusMeters.toInt()}m)",
+                    icon = GuardianMapMarkers.pin(GuardianMapMarkers.Kind.SafePlace),
+                    anchor = PIN_ANCHOR,
+                    title = safeLoc.name,
+                    snippet = "A place you marked safe (${safeLoc.radiusMeters.toInt()} m)",
                     onClick = {
                         selectedFeature = SelectedMapFeature.HomeFeature(safeLoc)
                         true
@@ -429,7 +451,9 @@ fun MapScreen(
                 safeHavens.forEach { haven ->
                     Marker(
                         state = rememberMarkerState(haven.location.latitude, haven.location.longitude),
-                        title = "🛡️ ${haven.name}",
+                        icon = GuardianMapMarkers.pin(GuardianMapMarkers.Kind.SafeHaven),
+                        anchor = PIN_ANCHOR,
+                        title = haven.name,
                         snippet = "${haven.openHoursDescription} · ${haven.address}",
                         onClick = {
                             selectedFeature = SelectedMapFeature.Haven(haven)
@@ -444,7 +468,16 @@ fun MapScreen(
                 crimeCells.forEach { cell ->
                     Marker(
                         state = rememberMarkerState(cell.center.latitude, cell.center.longitude),
-                        title = "⚠️ Reported Incidents (${cell.incidentCount})",
+                        // Sized and badged by how much was reported here: a cluster of
+                        // forty is a different place from a cluster of three, and
+                        // identical pins hid exactly that.
+                        icon = GuardianMapMarkers.pin(
+                            kind = GuardianMapMarkers.Kind.Hazard,
+                            badge = cell.incidentCount,
+                            emphasis = hazardEmphasis(cell.incidentCount),
+                        ),
+                        anchor = PIN_ANCHOR,
+                        title = "${cell.incidentCount} reported nearby",
                         snippet = "${cell.primaryOffense.displayName} · ${cell.jurisdiction}",
                         onClick = {
                             selectedFeature = SelectedMapFeature.Hazard(cell)
@@ -458,7 +491,9 @@ fun MapScreen(
             if (plan.destination != null) {
                 Marker(
                     state = rememberMarkerState(plan.destination.point.latitude, plan.destination.point.longitude),
-                    title = "📍 ${plan.destination.name}",
+                    icon = GuardianMapMarkers.pin(GuardianMapMarkers.Kind.Destination),
+                    anchor = PIN_ANCHOR,
+                    title = plan.destination.name,
                     snippet = plan.destination.address,
                 )
             }
@@ -593,12 +628,28 @@ fun MapScreen(
                 )
             }
 
-            // Floating Angel Text Status Bubble
+            // Angel's answer to "where am I?" — shown only on tap, and it stands down on
+            // its own so a user who tapped by accident is not left closing a card.
+            LaunchedEffect(angelCallout, angelPulse) {
+                if (angelCallout != null) {
+                    delay(ANGEL_CALLOUT_MILLIS)
+                    angelCallout = null
+                }
+            }
+            AngelLocationCallout(
+                callout = angelCallout,
+                onDismiss = { angelCallout = null },
+                modifier = Modifier.padding(top = 4.dp),
+            )
+
+            // Floating Angel Text Status Bubble. Hidden while the callout is up: two
+            // stacked bubbles saying overlapping things is noise, and the one the user
+            // asked for wins.
             AngelStatusBubble(
                 message = resolvedState.statusBubbleMessage,
                 category = resolvedState.statusCategory,
                 mood = resolvedState.mood,
-                visible = !statusBubbleDismissed,
+                visible = !statusBubbleDismissed && angelCallout == null,
                 onDismiss = { statusBubbleDismissed = true },
                 modifier = Modifier.padding(top = 4.dp),
             )
@@ -653,13 +704,15 @@ fun MapScreen(
         }
 
         // --- 5. Selected Feature Detail Sheet --------------------------------------
-        selectedFeature?.let { feat ->
-            MarkerDetailSheet(
-                feature = feat,
-                onDismiss = { selectedFeature = null },
-                modifier = Modifier.align(Alignment.BottomCenter),
-            )
-        }
+        // Lifted clear of the floating bottom navigation, and of the route sheet when a
+        // walk is being planned. Sitting behind the nav bar it was unreadable; sitting on
+        // top of it, it swallowed taps meant for another tab.
+        MarkerDetailSheet(
+            feature = selectedFeature,
+            onDismiss = { selectedFeature = null },
+            bottomInset = if (planning) PLANNING_SHEET_CLEARANCE else BottomBarClearance,
+            modifier = Modifier.align(Alignment.BottomCenter),
+        )
 
         // --- 6. Home Configuration Dialog ------------------------------------------
         if (showHomeDialog) {
@@ -1014,3 +1067,35 @@ private fun RouteAlternativesSheet(
         )
     }
 }
+
+/**
+ * Where a pin's point sits in its bitmap.
+ *
+ * Taken from the renderer rather than guessed. Without an anchor the SDK centres the
+ * whole bitmap on the coordinate, which puts every pin about half its own height north
+ * of the thing it marks — a consistent, invisible lie on a map whose entire purpose is
+ * where things are.
+ */
+private val PIN_ANCHOR = Offset(GuardianMapMarkers.ANCHOR_X, GuardianMapMarkers.ANCHOR_Y)
+
+/**
+ * How much bigger a dense hazard cluster is drawn.
+ *
+ * Capped, and rounded to the nearest tenth so the bitmap cache stays small. The growth
+ * is deliberately gentle: a cluster forty times larger must not be forty times the pin,
+ * or one bad block hides the whole neighbourhood underneath it.
+ */
+private fun hazardEmphasis(incidentCount: Int): Float =
+    (1f + (incidentCount.coerceAtMost(40) / 40f) * 0.5f)
+
+/** How long Angel's "where am I?" answer stays on screen before standing itself down. */
+private const val ANGEL_CALLOUT_MILLIS = 7_000L
+
+/**
+ * Room left under the marker sheet while a route is being planned.
+ *
+ * The route sheet is already sitting on the bottom-nav clearance, so the marker sheet has
+ * to clear both. Matched to the recenter button's own planning offset so the three move
+ * together.
+ */
+private val PLANNING_SHEET_CLEARANCE = 268.dp

@@ -159,26 +159,102 @@ class CodewordGate(
     }
 
     /**
-     * Finds the highest tier mentioned.
+     * Finds the highest tier mentioned, allowing for an imperfect transcript.
      *
-     * Highest rather than first so "I'm fine, lighthouse" is treated as the danger word
-     * it contains. Word-boundary matched, so "safe" does not fire inside "safely".
+     * Highest rather than first, so "I'm fine, lighthouse" is treated as the danger word
+     * it contains.
+     *
+     * ## Why exact matching is not enough
+     *
+     * The text being searched is a machine transcript of someone speaking, possibly in a
+     * hurry, possibly frightened, possibly outdoors. "lighthouse" comes back as "light
+     * house", "lighthous", or "like house". Requiring an exact match means the codeword
+     * works in a quiet room and fails in the situation it exists for.
+     *
+     * So matching runs in three passes, cheapest first:
+     *
+     * 1. **Exact**, on word boundaries — "safe" must not fire inside "safely".
+     * 2. **Space-insensitive** — "light house" matches "lighthouse", which is by far the
+     *    most common way a one-word phrase comes back.
+     * 3. **Edit distance**, over a window of words the same length as the phrase.
+     *    Tolerance scales with length: one edit for a short word, more for a long one.
+     *    Short phrases get no fuzzy pass at all, because at three or four characters
+     *    almost anything is within one edit of almost anything else.
      */
     private fun findMatch(text: String, codewords: List<Codeword>): Pair<CodewordTier, String>? {
         val haystack = text.lowercase()
+        val squashed = haystack.filter { !it.isWhitespace() }
+        val words = haystack.split(WORD_SPLIT).filter { it.isNotBlank() }
+
         return CodewordTier.entries
             .sortedByDescending { it.ordinal }
             .firstNotNullOfOrNull { tier ->
                 codewords.firstOrNull { it.tier == tier && it.phrase.isNotBlank() }
-                    ?.let { codeword ->
-                        val phrase = codeword.phrase.trim().lowercase()
-                        if (Regex("\\b${Regex.escape(phrase)}\\b").containsMatchIn(haystack)) {
-                            tier to codeword.phrase.trim()
-                        } else {
-                            null
-                        }
-                    }
+                    ?.takeIf { matches(it.phrase.trim().lowercase(), haystack, squashed, words) }
+                    ?.let { tier to it.phrase.trim() }
             }
+    }
+
+    private fun matches(
+        phrase: String,
+        haystack: String,
+        squashed: String,
+        words: List<String>,
+    ): Boolean {
+        if (Regex("\\b${Regex.escape(phrase)}\\b").containsMatchIn(haystack)) return true
+
+        val phraseSquashed = phrase.filter { !it.isWhitespace() }
+        if (phraseSquashed.length >= MIN_FUZZY_LENGTH && squashed.contains(phraseSquashed)) {
+            return true
+        }
+
+        val tolerance = toleranceFor(phraseSquashed)
+        if (tolerance == 0) return false
+
+        // Slide a window of the same word count, so a two-word phrase is compared
+        // against two-word stretches rather than against the whole sentence.
+        val span = phrase.split(WORD_SPLIT).count { it.isNotBlank() }.coerceAtLeast(1)
+        for (start in 0..(words.size - span).coerceAtLeast(0)) {
+            val window = words.subList(start, minOf(start + span, words.size))
+                .joinToString("")
+            if (window.isEmpty()) continue
+            // Cheap length guard before the quadratic distance calculation.
+            if (kotlin.math.abs(window.length - phraseSquashed.length) > tolerance) continue
+            if (editDistance(window, phraseSquashed) <= tolerance) return true
+        }
+        return false
+    }
+
+    /**
+     * How many character edits are forgiven.
+     *
+     * Scales with length and is capped: a long phrase can absorb more mistakes before it
+     * stops being recognisable, but allowing too many turns a codeword into a word the
+     * user never has to say correctly — and that is how an alert fires in conversation.
+     */
+    private fun toleranceFor(phrase: String): Int = when {
+        phrase.length < MIN_FUZZY_LENGTH -> 0
+        phrase.length <= 8 -> 1
+        phrase.length <= 14 -> 2
+        else -> 3
+    }
+
+    /** Levenshtein, two rows rather than a full matrix. */
+    private fun editDistance(a: String, b: String): Int {
+        if (a == b) return 0
+        var previous = IntArray(b.length + 1) { it }
+        var current = IntArray(b.length + 1)
+        for (i in 1..a.length) {
+            current[0] = i
+            for (j in 1..b.length) {
+                val substitution = previous[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1
+                current[j] = minOf(current[j - 1] + 1, previous[j] + 1, substitution)
+            }
+            val swap = previous
+            previous = current
+            current = swap
+        }
+        return previous[b.length]
     }
 
     private fun recentlyFired(tier: CodewordTier): Boolean =
@@ -217,6 +293,16 @@ class CodewordGate(
     }
 
     companion object {
+        private val WORD_SPLIT = Regex("[^a-z0-9]+")
+
+        /**
+         * Shortest phrase that gets a fuzzy pass.
+         *
+         * Below six characters the edit-distance window matches far too much ordinary
+         * speech — at four characters, most short words are one edit from each other.
+         */
+        private const val MIN_FUZZY_LENGTH = 6
+
         /**
          * How long the same tier is ignored after firing.
          *

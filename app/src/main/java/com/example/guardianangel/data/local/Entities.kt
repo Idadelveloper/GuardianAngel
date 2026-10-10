@@ -58,6 +58,17 @@ data class UserEntity(
      */
     val encryptedPasswordHash: ByteArray? = null,
     val shieldActive: Boolean = true,
+    /**
+     * Whether a top-tier alert also rings a guardian's phone.
+     *
+     * On by default. A text can sit unread in a pocket for twenty minutes, and the tier
+     * this applies to is the one the user deliberately reserved for the worst case — so
+     * the default that matches what she meant by choosing it is "ring someone". It is a
+     * stored setting rather than a constant because it is also the kind of thing a user
+     * has an absolute right to switch off, and a safety feature nobody can turn off gets
+     * uninstalled instead.
+     */
+    val callGuardianOnEmergency: Boolean = true,
     /** Where the setup wizard got to, so it can resume rather than restart. */
     val onboardingStep: String = "SignUp",
     val createdAt: Long,
@@ -78,6 +89,7 @@ data class UserEntity(
             authProvider == other.authProvider &&
             sessionActive == other.sessionActive &&
             shieldActive == other.shieldActive &&
+            callGuardianOnEmergency == other.callGuardianOnEmergency &&
             onboardingStep == other.onboardingStep &&
             createdAt == other.createdAt &&
             updatedAt == other.updatedAt &&

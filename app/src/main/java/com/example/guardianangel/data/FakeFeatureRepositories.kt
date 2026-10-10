@@ -121,6 +121,11 @@ class FakeAccountRepository(
     override suspend fun setDisarmPin(pin: String) =
         state.update { it.copy(disarmPin = it.disarmPin.copy(isSet = pin.isNotBlank())) }
 
+    override suspend fun setCallGuardianOnEmergency(enabled: Boolean) =
+        state.update {
+            it.copy(profile = it.profile?.copy(callGuardianOnEmergency = enabled))
+        }
+
     override suspend fun advanceOnboarding(step: OnboardingStep) =
         state.update { it.copy(onboardingStep = step) }
 

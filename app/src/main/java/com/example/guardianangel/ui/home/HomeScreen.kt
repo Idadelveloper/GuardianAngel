@@ -22,12 +22,18 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.guardianangel.data.GuardianSamples
@@ -36,6 +42,7 @@ import com.example.guardianangel.domain.model.GuardianCapability
 import com.example.guardianangel.domain.model.GuardianSetup
 import com.example.guardianangel.domain.model.guardianSetup
 import com.example.guardianangel.domain.model.GuardianMode
+import com.example.guardianangel.domain.model.EmergencyContact
 import com.example.guardianangel.domain.model.GuardianSnapshot
 import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.TrailPoint
@@ -44,6 +51,7 @@ import com.example.guardianangel.domain.model.ListeningRequirement
 import com.example.guardianangel.domain.model.ListeningStatus
 import com.example.guardianangel.domain.model.WakeWord
 import com.example.guardianangel.domain.model.ActivityFilter
+import com.example.guardianangel.domain.alert.AlertDispatcher
 import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
@@ -94,6 +102,7 @@ fun HomeRoute(
     contactsRepository: ContactsRepository,
     voiceProfiles: VoiceProfileRepository,
     activityRepository: ActivityRepository,
+    alertDispatcher: AlertDispatcher,
     permissions: PermissionProbe,
     angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator? = null,
     onOpenSession: (String) -> Unit,
@@ -108,6 +117,9 @@ fun HomeRoute(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     val handsFree = rememberHandsFreeController(listeningRepository)
+    val scope = rememberCoroutineScope()
+    // What actually happened to the last alert, shown rather than assumed.
+    var alertStatus by remember { mutableStateOf<String?>(null) }
     val listeningStatus by listeningRepository.observeStatus()
         .collectAsStateWithLifecycle(initialValue = ListeningStatus())
     val wakeWord by listeningRepository.observeWakeWord()
@@ -165,11 +177,15 @@ fun HomeRoute(
             }
         },
         onDuress = { tier ->
-            // Dispatch *and* record. The alert used to only flip in-memory state, so a
-            // duress trigger notified the circle with no audio, no transcript and no
-            // session to hand anyone afterwards — an alert with no evidence behind it.
+            // Record *and* actually reach someone. The SOS hold used to flip in-memory
+            // UI state and nothing else: no audio, no transcript, and no message to any
+            // guardian. It looked like an alert and was not one.
             handsFree.recordNow()
-            viewModel.onAction(HomeAction.DispatchAlert(tier))
+            scope.launch {
+                val dispatch = alertDispatcher.dispatch(tier)
+                alertStatus = dispatch?.summaryLine
+                    ?: "The alert could not be sent. Call someone directly."
+            }
         },
         onStopRecording = {
             handsFree.stopRecording()
@@ -179,6 +195,9 @@ fun HomeRoute(
             viewModel.onAction(HomeAction.StopRecording)
             viewModel.onAction(HomeAction.DisarmGuardian)
         },
+        guardians = guardians,
+        alertStatus = alertStatus,
+        onDismissAlertStatus = { alertStatus = null },
         recentSessions = recentSessions,
         trails = trails,
         setup = setup,
@@ -220,6 +239,9 @@ fun HomeScreen(
     onRecordNow: () -> Unit = {},
     onStopRecording: () -> Unit = {},
     onDuress: (CodewordTier) -> Unit = {},
+    guardians: List<EmergencyContact> = emptyList(),
+    alertStatus: String? = null,
+    onDismissAlertStatus: () -> Unit = {},
     recentSessions: List<MonitoredSession> = emptyList(),
     trails: Map<String, List<TrailPoint>> = emptyMap(),
     setup: GuardianSetup = GuardianSetup(GuardianCapability.entries.toSet()),
@@ -243,6 +265,9 @@ fun HomeScreen(
             onRecordNow = onRecordNow,
             onStopRecording = onStopRecording,
             onDuress = onDuress,
+            guardians = guardians,
+            alertStatus = alertStatus,
+            onDismissAlertStatus = onDismissAlertStatus,
             recentSessions = recentSessions,
             trails = trails,
             setup = setup,
@@ -289,6 +314,9 @@ private fun ReadyState(
     onRecordNow: () -> Unit,
     onStopRecording: () -> Unit,
     onDuress: (CodewordTier) -> Unit,
+    guardians: List<EmergencyContact>,
+    alertStatus: String?,
+    onDismissAlertStatus: () -> Unit,
     recentSessions: List<MonitoredSession>,
     trails: Map<String, List<TrailPoint>>,
     setup: GuardianSetup,
@@ -322,6 +350,43 @@ private fun ReadyState(
                 onDismiss = onDismissAmber,
                 onEmergencyCall = { onAction(HomeAction.DispatchAlert(CodewordTier.Emergency)) },
             )
+        }
+
+        // What happened to the last alert.
+        //
+        // Directly under the top bar and dismissible. After a duress hold the only
+        // question that matters is whether anyone was actually reached, and the app
+        // knows per guardian — leaving her to assume would be the worst kind of silence.
+        alertStatus?.let { status ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(GuardianTheme.shapes.lg)
+                    .background(GuardianTheme.colors.accentSoft)
+                    .clickable(role = Role.Button, onClick = onDismissAlertStatus)
+                    .padding(GuardianTheme.spacing.md),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
+            ) {
+                Icon(
+                    imageVector = GuardianIcons.Broadcast,
+                    contentDescription = null,
+                    tint = GuardianTheme.colors.onAccentSoft,
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(
+                    text = status,
+                    style = GuardianTheme.type.bodySm,
+                    color = GuardianTheme.colors.onAccentSoft,
+                    modifier = Modifier.weight(1f),
+                )
+                Icon(
+                    imageVector = GuardianIcons.Close,
+                    contentDescription = "Dismiss",
+                    tint = GuardianTheme.colors.onAccentSoft,
+                    modifier = Modifier.size(16.dp),
+                )
+            }
         }
 
         AngelHeroCard(
@@ -359,7 +424,7 @@ private fun ReadyState(
             liveSession?.let { session ->
                 ActiveRecordingPanel(
                     session = session,
-                    contactsNotifiedLabel = notifiedLabel(snapshot),
+                    contactsNotifiedLabel = notifiedLabel(snapshot, guardians),
                     onStop = onStopRecording,
                 )
             }
@@ -399,12 +464,19 @@ private fun ReadyState(
         )
 
         if (atHaven) {
-            SanctuaryBody(snapshot, onPlanRoute, onRecordNow, onDuress)
+            SanctuaryBody(onPlanRoute, onRecordNow, onDuress, guardians)
         } else {
-            JourneyBody(snapshot, onAction, isRecording, onRecordNow, onDuress)
+            JourneyBody(snapshot, onAction, isRecording, onRecordNow, onDuress, guardians)
         }
 
-        GuardiansStrip(contacts = snapshot.contacts)
+        // The real circle, from Room.
+        //
+        // This read `snapshot.contacts`, which still comes from the sample-backed
+        // guardian repository — so every account was told "Sarah, David & 1 more are on
+        // standby for you" regardless of whether anyone had been added. For a safety
+        // app that is the worst possible thing to be wrong about: it says help is
+        // arranged when none is.
+        GuardiansStrip(contacts = guardians)
 
         // Shown only when there is something to show.
         //
@@ -488,10 +560,10 @@ private fun AmberAlertBanner(
 /** Sanctuary: one clear way out the door, two quiet secondary actions. */
 @Composable
 private fun SanctuaryBody(
-    snapshot: GuardianSnapshot,
     onPlanRoute: () -> Unit,
     onRecordNow: () -> Unit,
     onDuress: (CodewordTier) -> Unit,
+    guardians: List<EmergencyContact>,
 ) {
     GuardianPrimaryButton(
         text = "Start guarded walk",
@@ -516,7 +588,7 @@ private fun SanctuaryBody(
     // view uses, so there is one SOS in the app and it behaves the same everywhere.
     DuressTriggerCard(
         onFire = onDuress,
-        notifyingLabel = snapshot.contacts
+        notifyingLabel = guardians
             .takeIf { it.isNotEmpty() }
             ?.joinToString(" and ") { it.name.substringBefore(' ') }
             ?.let { "Sends a silent alert with your live location to $it." }
@@ -532,11 +604,12 @@ private fun JourneyBody(
     isRecording: Boolean,
     onRecordNow: () -> Unit,
     onDuress: (CodewordTier) -> Unit,
+    guardians: List<EmergencyContact>,
 ) {
     if (!isRecording) {
         DuressTriggerCard(
             onFire = onDuress,
-            notifyingLabel = snapshot.contacts
+            notifyingLabel = guardians
                 .takeIf { it.isNotEmpty() }
                 ?.joinToString(" and ") { it.name.substringBefore(' ') }
                 ?.let { "Sends a silent alert with your live location to $it." },
@@ -614,9 +687,12 @@ private fun angelMessage(snapshot: GuardianSnapshot, mood: AngelMood): String {
 
 /** Human-readable summary of who the active session has already alerted. */
 @Composable
-private fun notifiedLabel(snapshot: GuardianSnapshot): String? {
+private fun notifiedLabel(
+    snapshot: GuardianSnapshot,
+    guardians: List<EmergencyContact>,
+): String? {
     val session = snapshot.activeSession ?: return null
-    val names = snapshot.contacts
+    val names = guardians
         .filter { it.id in session.contactsNotified }
         .map { it.name.substringBefore(' ') }
     return when (names.size) {

@@ -12,26 +12,41 @@ import com.google.android.gms.maps.model.BitmapDescriptorFactory
  * Generates and caches custom Google Maps marker bitmaps for the Angel mascot.
  *
  * Invariants:
- * 1. Cached by [AngelMood] tier: never regenerates expensive bitmap assets on GPS tick.
+ * 1. Cached by [AngelMood] tier and quantised scale: never regenerates expensive bitmap
+ *    assets on a GPS tick, and a tap pulse costs at most a handful of extra bitmaps.
  * 2. Visual design reflects the five Angel mood tiers: Resting, Sanctuary, Cautious,
  *    Warning, Critical.
  * 3. Shows distinct halo, aura, and wings matching the mascot design system.
  */
 object AngelMarkerRenderer {
 
-    private val cache = mutableMapOf<AngelMood, BitmapDescriptor>()
+    private val cache = mutableMapOf<String, BitmapDescriptor>()
 
-    fun getMarkerBitmapDescriptor(mood: AngelMood): BitmapDescriptor {
-        return cache.getOrPut(mood) {
-            val bitmap = createAngelBitmap(mood)
-            BitmapDescriptorFactory.fromBitmap(bitmap)
+    /** Scale steps the pulse is rounded to, so the cache stays a handful of bitmaps. */
+    private const val SCALE_QUANTUM = 0.05f
+
+    /**
+     * Angel, at [mood], drawn [scale]× her resting size.
+     *
+     * The scale exists for the tap pulse. It is quantised because a continuous animation
+     * would otherwise allocate a fresh bitmap on every frame — sixty a second, each one
+     * uploaded to the map's texture atlas.
+     */
+    fun getMarkerBitmapDescriptor(mood: AngelMood, scale: Float = 1f): BitmapDescriptor {
+        val stepped = (Math.round(scale.coerceIn(0.6f, 1.8f) / SCALE_QUANTUM) * SCALE_QUANTUM)
+        val key = "${mood.name}@$stepped"
+        return cache.getOrPut(key) {
+            BitmapDescriptorFactory.fromBitmap(createAngelBitmap(mood, stepped))
         }
     }
 
-    private fun createAngelBitmap(mood: AngelMood): Bitmap {
-        val size = 120
+    private fun createAngelBitmap(mood: AngelMood, scale: Float = 1f): Bitmap {
+        val size = Math.round(120 * scale)
         val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        // Every coordinate below is authored against a 120 px canvas; scaling here keeps
+        // the drawing code honest rather than threading a factor through forty call sites.
+        canvas.scale(scale, scale)
 
         val auraColor = when (mood) {
             AngelMood.Resting -> 0x88FFE8A3.toInt()

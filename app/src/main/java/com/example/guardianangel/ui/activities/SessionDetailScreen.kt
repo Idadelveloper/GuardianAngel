@@ -37,6 +37,7 @@ import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.SpeakerKind
 import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.ui.components.GuardianCard
+import com.example.guardianangel.ui.components.GuardianOutlinedButton
 import com.example.guardianangel.ui.components.GuardianPrimaryButton
 import com.example.guardianangel.ui.components.GuardianStackScaffold
 import com.example.guardianangel.ui.home.components.MetricTile
@@ -97,6 +98,12 @@ fun SessionDetailRoute(
             }
         },
         onShare = { path -> context.shareTranscript(path) },
+        onDelete = {
+            scope.launch {
+                repository.deleteSession(sessionId)
+                onBack()
+            }
+        },
         modifier = modifier,
     )
 }
@@ -136,7 +143,12 @@ fun SessionDetailScreen(
     modifier: Modifier = Modifier,
     exportState: ExportState = ExportState.Idle,
     onShare: (String) -> Unit = {},
+    onDelete: () -> Unit = {},
 ) {
+    // Two taps, not a dialog. Deleting a recording destroys evidence, so it should not
+    // happen on one stray touch — but a user who wants it gone, perhaps because someone
+    // is standing over her, should not have to fight a modal to do it.
+    var confirmingDelete by remember(session?.id) { mutableStateOf(false) }
     GuardianStackScaffold(
         title = "Session",
         onBack = onBack,
@@ -258,6 +270,29 @@ fun SessionDetailScreen(
         // empty decorative map with a caption claiming a trail was stored, under a
         // session whose actual breadcrumbs were sitting unread in the database.
         SessionTrailSection(trail = trail)
+
+        // --- Delete -----------------------------------------------------------------
+        Column(modifier = Modifier.fillMaxWidth()) {
+            GuardianOutlinedButton(
+                text = if (confirmingDelete) {
+                    "Tap again to delete permanently"
+                } else {
+                    "Delete this recording"
+                },
+                onClick = { if (confirmingDelete) onDelete() else confirmingDelete = true },
+                leadingIcon = GuardianIcons.Close,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            if (confirmingDelete) {
+                Spacer(Modifier.height(GuardianTheme.spacing.xs))
+                Text(
+                    text = "The transcript, the sounds and the path all go with it. " +
+                        "This cannot be undone.",
+                    style = GuardianTheme.type.labelSm,
+                    color = GuardianTheme.materialColors.error,
+                )
+            }
+        }
 
         // --- Diarized stream --------------------------------------------------------
         if (session.entries.isNotEmpty()) {
