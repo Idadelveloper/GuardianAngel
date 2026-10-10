@@ -149,7 +149,19 @@ class SherpaSpeakerIdentifier(
      * unverifiable voice is handled differently from one that is positively a stranger.
      */
     fun attribute(samples: FloatArray): SpeakerAttribution? {
-        val embedding = embedSpeech(samples) ?: return null
+        val embedding = embedSpeech(samples)
+        if (embedding == null) {
+            // Worth saying out loud. Every caller treats null as "cannot tell", which
+            // renders as the neutral "Speaker" label — so a model that failed to load,
+            // or segments that keep arriving too short, looks exactly like a transcript
+            // where nobody is ever identified. These two have very different fixes.
+            Log.w(
+                TAG,
+                "No embedding for a ${samples.size / (SAMPLE_RATE / 1000)} ms segment " +
+                    "(extractor loaded: ${extractor != null}) — speaker left unattributed",
+            )
+            return null
+        }
 
         var bestIndex = -1
         var bestScore = SAME_SPEAKER
@@ -168,11 +180,21 @@ class SherpaSpeakerIdentifier(
         }
 
         val reference = enrolledVoiceprint
+        val score = reference?.let { cosineSimilarity(embedding, it) }
+        // The actual number, not just the verdict. Whether a stranger's line is labelled
+        // as a stranger comes down to this one comparison against SAME_SPEAKER, and
+        // without the score in the log a mis-labelled transcript is unfalsifiable —
+        // there is no way to tell a threshold that is too low from a voiceprint that was
+        // never enrolled.
+        Log.d(
+            TAG,
+            "speaker $tag, ${sessionSpeakers.size} this session, " +
+                (score?.let { "score %.2f vs enrolled (threshold %.2f)".format(it, SAME_SPEAKER) }
+                    ?: "no enrolled voiceprint to compare against"),
+        )
         return SpeakerAttribution(
             tag = tag,
-            isEnrolledUser = reference?.let {
-                cosineSimilarity(embedding, it) >= SAME_SPEAKER
-            },
+            isEnrolledUser = score?.let { it >= SAME_SPEAKER },
         )
     }
 

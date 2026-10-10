@@ -177,9 +177,9 @@ class AlertDispatcherCallTest {
 
         dispatcher.dispatch(CodewordTier.Emergency)
 
-        // The agent's own summary line names her too, so it is the call note — written
-        // last — that has to be checked.
-        val note = recorder.events.last()
+        // The agent's own summary line names her too, and the two are written
+        // concurrently now, so the note is picked by content rather than by position.
+        val note = recorder.events.single { it.contains("Amara") && !it.contains("alert") }
         assertTrue("got: $note", note.contains("tap"))
         assertTrue("must not claim a call", !note.startsWith("Calling"))
     }

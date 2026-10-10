@@ -98,6 +98,9 @@ class GuardianListeningService : Service() {
     /** The single path an alert takes, shared with the SOS button. */
     private val alerts get() = appContainer.alertDispatcher
 
+    /** Writes the title and summary once the recording is closed. */
+    private val summaryAgent get() = appContainer.summaryAgent
+
     /** Wall-clock of the last thing worth noticing, for the inactivity timeout. */
     @Volatile
     private var lastSignificantEvent = 0L
@@ -204,12 +207,28 @@ class GuardianListeningService : Service() {
                         orchestrator.onLocationUpdate(point, address)
                         // Breadcrumbed into the session so the exported record can say
                         // where each part of the conversation happened.
-                        recorder.addLocation(
-                            latitude = point.latitude,
-                            longitude = point.longitude,
-                            atMillis = System.currentTimeMillis(),
-                            label = address,
-                            safetyScore = orchestrator.state.value.factors.compositeSafetyScore,
+                        recordBreadcrumb(point, address, orchestrator)
+                    }
+                }
+
+                // A heartbeat, because the location stream only fires after five metres
+                // of movement. Someone standing still — stopped by a stranger, held
+                // somewhere, sitting in a car that is not moving yet — produced no
+                // breadcrumbs at all, so the trail ended at the last place she walked
+                // and the record could not show that she stayed there for eleven
+                // minutes. That gap is the shape of the incident.
+                scope.launch {
+                    while (true) {
+                        delay(BREADCRUMB_HEARTBEAT_MILLIS)
+                        if (System.currentTimeMillis() - lastBreadcrumbAt < BREADCRUMB_HEARTBEAT_MILLIS) {
+                            continue
+                        }
+                        val point = runCatching { tracker.getCurrentLocation() }.getOrNull()
+                            ?: continue
+                        recordBreadcrumb(
+                            point = point,
+                            address = runCatching { tracker.reverseGeocode(point) }.getOrNull(),
+                            orchestrator = orchestrator,
                         )
                     }
                 }
@@ -351,6 +370,24 @@ class GuardianListeningService : Service() {
                 updateNotification(recording = true)
             }
         }
+    }
+
+    /** When a point was last written, so the heartbeat only fills real gaps. */
+    private var lastBreadcrumbAt = 0L
+
+    private suspend fun recordBreadcrumb(
+        point: com.example.guardianangel.domain.model.GeoPoint,
+        address: String?,
+        orchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator,
+    ) {
+        lastBreadcrumbAt = System.currentTimeMillis()
+        recorder.addLocation(
+            latitude = point.latitude,
+            longitude = point.longitude,
+            atMillis = lastBreadcrumbAt,
+            label = address,
+            safetyScore = orchestrator.state.value.factors.compositeSafetyScore,
+        )
     }
 
     /** Marks activity, which keeps the inactivity timeout from firing. */
@@ -527,10 +564,15 @@ class GuardianListeningService : Service() {
         // Close the session before the models go, so the summary reflects everything
         // captured. Runs on the teardown scope because `scope` is about to be cancelled.
         teardownScope.launch {
+            // Captured before `finish()`, which clears it.
+            val finishedId = recorder.activeSessionId
             runCatching { recorder.finish() }
             codewordGate.reset()
             // So the next session can alert again at a tier this one already used.
             runCatching { alerts.resetForNewSession() }
+            // Only now, with every line written, can anything say what this was. The
+            // recorder could only title it by how long it ran.
+            finishedId?.let { summaryAgent.summarise(it) }
         }
         // The notification and the service go immediately — the user asked to stand down
         // and should see that happen. Freeing the models trails behind, in order.
@@ -637,6 +679,14 @@ class GuardianListeningService : Service() {
          * and danger sounds both reset it, so an incident cannot time out mid-way.
          */
         private const val IDLE_TIMEOUT_MILLIS = 30 * 60 * 1000L
+
+        /**
+         * How often a point is written when the user is not moving.
+         *
+         * A minute: frequent enough that a stop is visible on the trail, sparse enough
+         * that a half-hour recording adds thirty rows rather than nine hundred.
+         */
+        private const val BREADCRUMB_HEARTBEAT_MILLIS = 60_000L
         private const val ACTION_RECORD = "com.example.guardianangel.START_RECORDING"
 
         /** Marks a session the user started by hand rather than by speaking. */

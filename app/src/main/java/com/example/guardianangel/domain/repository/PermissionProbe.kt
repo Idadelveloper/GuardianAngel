@@ -23,6 +23,14 @@ interface PermissionProbe {
     /** Fine location. Angel can listen without it; she just cannot say where you are. */
     fun hasLocation(): Boolean
 
+    /**
+     * `SEND_SMS`.
+     *
+     * Not required to run, but it is the difference between an alert that goes out on
+     * its own and one waiting on a tap the user may never be able to give.
+     */
+    fun hasSendSms(): Boolean
+
     /** Battery optimisation exemption. Not required, but long walks get killed without it. */
     fun isBatteryExempt(): Boolean
 }

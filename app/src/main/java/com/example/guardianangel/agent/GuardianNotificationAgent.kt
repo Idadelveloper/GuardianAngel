@@ -55,11 +55,22 @@ class GuardianNotificationAgent(
         val summaryLine: String
             get() = when {
                 suppressed -> "${tier.name} alert already sent this session; not repeated."
-                outcome.anyReached ->
-                    "${tier.name} alert sent to ${outcome.reached.joinToString(", ")}" +
-                        outcome.failed.takeIf { it.isNotEmpty() }
-                            ?.let { "; could not reach ${it.joinToString(", ")}" }
-                            .orEmpty()
+                outcome.anyReached -> buildString {
+                    append(tier.name).append(" alert ")
+                    if (outcome.reached.isNotEmpty()) {
+                        append("sent to ").append(outcome.reached.joinToString(", "))
+                    }
+                    // Named separately, never folded into "sent". The network took it
+                    // but has not said it went out, and the user deciding whether to
+                    // look for help herself needs to know which of the two it was.
+                    if (outcome.unconfirmed.isNotEmpty()) {
+                        if (outcome.reached.isNotEmpty()) append("; ")
+                        append("still sending to ").append(outcome.unconfirmed.joinToString(", "))
+                    }
+                    if (outcome.failed.isNotEmpty()) {
+                        append("; could not reach ").append(outcome.failed.joinToString(", "))
+                    }
+                }
                 outcome.blockedReason != null -> "${tier.name} alert not sent — ${outcome.blockedReason}"
                 else -> "${tier.name} alert could not be delivered to anyone."
             }

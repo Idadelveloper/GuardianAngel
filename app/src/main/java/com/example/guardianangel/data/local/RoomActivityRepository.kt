@@ -1,8 +1,10 @@
 package com.example.guardianangel.data.local
 
+import android.util.Log
 import com.example.guardianangel.domain.model.ActivityFilter
 import com.example.guardianangel.domain.model.AnalyticsRange
 import com.example.guardianangel.domain.model.Breakdown
+import com.example.guardianangel.domain.model.CodewordTier
 import com.example.guardianangel.domain.model.DiarizedEntry
 import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.MovementAnalytics
@@ -36,6 +38,8 @@ import java.util.concurrent.TimeUnit
  * deleted session immediately stops counting toward the insights — which is the whole
  * point of being able to delete one.
  */
+private const val TAG = "RoomActivity"
+
 class RoomActivityRepository(
     private val dao: SessionDao,
     private val currentUser: CurrentUser,
@@ -125,6 +129,19 @@ class RoomActivityRepository(
                 }
             }
         }
+
+    override suspend fun updateNarrative(sessionId: String, title: String, summary: String) {
+        runCatching {
+            val existing = dao.find(sessionId) ?: return
+            dao.upsert(
+                existing.copy(
+                    title = title,
+                    summary = summary,
+                    updatedAt = System.currentTimeMillis(),
+                )
+            )
+        }.onFailure { Log.w(TAG, "Could not save the summary for $sessionId", it) }
+    }
 
     override suspend fun exportSession(sessionId: String): String {
         val session = dao.find(sessionId) ?: error("That session no longer exists.")
@@ -333,6 +350,9 @@ private fun SessionEntity.toModel(entries: List<DiarizedEntry> = emptyList()) = 
     isEncrypted = isEncrypted,
     entries = entries,
     guardiansNotified = guardiansNotified.split("|").filter { it.isNotBlank() },
+    triggeredByTier = triggeredByTier?.let {
+        runCatching { CodewordTier.valueOf(it) }.getOrNull()
+    },
 )
 
 private fun TranscriptEntryEntity.toEntry() = DiarizedEntry(

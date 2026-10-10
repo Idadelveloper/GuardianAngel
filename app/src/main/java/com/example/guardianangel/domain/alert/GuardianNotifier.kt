@@ -28,14 +28,28 @@ interface GuardianNotifier {
  * matters most. The session record and the UI both show this.
  */
 data class NotifyOutcome(
+    /** Confirmed delivered to the network. */
     val reached: List<String>,
+    /** The network refused it, or there was nothing sendable to try. */
     val failed: List<String>,
+    /**
+     * Handed to the radio, but no result came back in time.
+     *
+     * Its own category because it is genuinely a third state. Treating it as reached
+     * tells the user help is on the way when the message may be sitting in a queue on a
+     * train; treating it as failed would have her give up on a text that very likely
+     * did arrive. Usually a weak signal — exactly the conditions this app is for.
+     */
+    val unconfirmed: List<String> = emptyList(),
     /** Set when nothing could be sent at all, phrased for the user. */
     val blockedReason: String? = null,
 ) {
-    val anyReached: Boolean get() = reached.isNotEmpty()
+    val anyReached: Boolean get() = reached.isNotEmpty() || unconfirmed.isNotEmpty()
+
+    /** Everyone the message was actually put on the wire for. */
+    val attempted: List<String> get() = reached + unconfirmed
 
     companion object {
-        fun blocked(reason: String) = NotifyOutcome(emptyList(), emptyList(), reason)
+        fun blocked(reason: String) = NotifyOutcome(emptyList(), emptyList(), emptyList(), reason)
     }
 }

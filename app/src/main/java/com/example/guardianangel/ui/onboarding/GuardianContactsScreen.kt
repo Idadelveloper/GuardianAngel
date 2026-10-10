@@ -10,9 +10,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.Text
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
@@ -25,6 +34,7 @@ import com.example.guardianangel.ui.components.GuardianCheckbox
 import com.example.guardianangel.ui.components.GuardianOutlinedButton
 import com.example.guardianangel.ui.components.GuardianTextField
 import com.example.guardianangel.ui.components.GuardianWizardScaffold
+import com.example.guardianangel.ui.home.components.SectionHeader
 import com.example.guardianangel.ui.icons.GuardianIcons
 import com.example.guardianangel.ui.mascot.AngelMood
 import com.example.guardianangel.ui.theme.GuardianAngelTheme
@@ -96,6 +106,20 @@ fun GuardianContactsScreen(
     }
 
     val canSave = name.isNotBlank() && phone.length >= 7
+
+    // Asked for here, on the step where the reason is self-evident: she is naming the
+    // person it will text. Nothing in the app used to request it, so every alert fell
+    // back to opening the messaging app and waiting for a tap.
+    val context = LocalContext.current
+    var canSendSilently by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.SEND_SMS) ==
+                PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val smsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> canSendSilently = granted }
 
     GuardianWizardScaffold(
         modifier = modifier,
@@ -186,6 +210,27 @@ fun GuardianContactsScreen(
                 label = "Send surrounding audio",
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+
+        if (!canSendSilently) {
+            GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
+                SectionHeader(title = "Let me send the text myself", icon = GuardianIcons.Broadcast)
+                Spacer(Modifier.height(GuardianTheme.spacing.sm))
+                Text(
+                    text = "Without this I can only open your messaging app with the " +
+                        "alert ready and wait for you to tap send — which is no help if " +
+                        "your phone is in your pocket or someone else has it.",
+                    style = GuardianTheme.type.bodySm,
+                    color = GuardianTheme.materialColors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(GuardianTheme.spacing.md))
+                GuardianOutlinedButton(
+                    text = "Allow sending texts",
+                    onClick = { smsLauncher.launch(Manifest.permission.SEND_SMS) },
+                    leadingIcon = GuardianIcons.Broadcast,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
 
         AssuranceCard(

@@ -72,6 +72,8 @@ data class MonitoredSession(
     val isEncrypted: Boolean = true,
     val entries: List<DiarizedEntry> = emptyList(),
     val guardiansNotified: List<String> = emptyList(),
+    /** The codeword tier that opened or escalated this session, if one did. */
+    val triggeredByTier: CodewordTier? = null,
 ) {
     val durationMinutes: Long?
         get() = endedAtEpochMillis?.let { (it - startedAtEpochMillis) / 60_000 }

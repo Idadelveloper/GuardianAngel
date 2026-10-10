@@ -13,10 +13,12 @@ class GrantedPermissions(
     var microphone: Boolean = true,
     var notifications: Boolean = true,
     var location: Boolean = true,
+    var sendSms: Boolean = true,
     var batteryExempt: Boolean = true,
 ) : PermissionProbe {
     override fun hasMicrophone(): Boolean = microphone
     override fun hasNotifications(): Boolean = notifications
     override fun hasLocation(): Boolean = location
+    override fun hasSendSms(): Boolean = sendSms
     override fun isBatteryExempt(): Boolean = batteryExempt
 }

@@ -1,5 +1,7 @@
 package com.example.guardianangel.ui.home
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -118,6 +120,16 @@ fun HomeRoute(
 
     val handsFree = rememberHandsFreeController(listeningRepository)
     val scope = rememberCoroutineScope()
+
+    // Asked for from the home screen because this is where the gap is surfaced. Until
+    // this existed nothing in the app ever requested SEND_SMS, so every alert quietly
+    // fell back to opening the messaging app and waiting for a tap — the one failure
+    // mode the whole feature exists to avoid.
+    var smsRefusedAt by remember { mutableStateOf(0L) }
+    val smsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> if (!granted) smsRefusedAt = System.currentTimeMillis() }
+    val requestSendSms: () -> Unit = { smsLauncher.launch(android.Manifest.permission.SEND_SMS) }
     // What actually happened to the last alert, shown rather than assumed.
     var alertStatus by remember { mutableStateOf<String?>(null) }
     val listeningStatus by listeningRepository.observeStatus()
@@ -153,6 +165,7 @@ fun HomeRoute(
         // Only phrases she chose. The four seeded suggestions are not setup.
         customisedCodewordCount = codewords.count { it.isCustomised },
         guardianCount = guardians.size,
+        canSendSilently = permissions.hasSendSms(),
     )
 
     HomeScreen(
@@ -210,6 +223,7 @@ fun HomeRoute(
                 GuardianCapability.LocationSharing -> handsFree.requestLocation()
                 GuardianCapability.CodewordActions -> onSetUpCodewords()
                 GuardianCapability.GuardianAlerts -> onSetUpGuardians()
+                GuardianCapability.SilentAlerts -> requestSendSms()
             }
         },
         onFixBlocker = { requirement ->

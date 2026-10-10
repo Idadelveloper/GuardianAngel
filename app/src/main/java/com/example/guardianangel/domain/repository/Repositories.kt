@@ -100,6 +100,15 @@ interface ActivityRepository {
      */
     fun observeTrailPaths(): Flow<Map<String, List<TrailPoint>>>
 
+    /**
+     * Replaces the title and summary a finished session was saved with.
+     *
+     * Written by `SessionSummaryAgent` once the recording is closed. The recorder can
+     * only name a session by how long it ran, because while it is running nobody knows
+     * yet what it was.
+     */
+    suspend fun updateNarrative(sessionId: String, title: String, summary: String)
+
     /** Produces an encrypted ledger for sharing. Returns a user-facing file name. */
     suspend fun exportSession(sessionId: String): String
     suspend fun deleteSession(sessionId: String)

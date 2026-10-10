@@ -7,6 +7,10 @@ import com.example.guardianangel.domain.model.DiarizedEntry
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.GuardianRepository
 import com.example.guardianangel.domain.repository.SessionRecorder
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
 
 private const val TAG = "AlertDispatcher"
@@ -74,10 +78,24 @@ class AlertDispatcher(
      */
     private var calledThisSession = false
 
+    /**
+     * Where the parallel call runs.
+     *
+     * Its own scope, not the caller's: dispatch is called from a button handler and from
+     * an audio callback, and a cancelled caller must not abandon a half-placed call.
+     */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     suspend fun dispatch(tier: CodewordTier): GuardianNotificationAgent.Dispatch? = try {
         val guardians = contacts.observeContacts().first()
         val fix = runCatching { currentLocation() }.getOrNull()
         val entries = runCatching { sessionEntries() }.getOrDefault(emptyList())
+
+        // Started before the text finishes rather than after it. The message is handed
+        // to the radio in milliseconds; what takes seconds is the network *confirming*
+        // it, and making a ringing phone wait on that confirmation would be trading the
+        // fastest channel for the slowest one's latency.
+        val call = scope.async { placeCallIfWarranted(tier) }
 
         val result = notificationAgent.dispatch(
             tier = tier,
@@ -92,7 +110,10 @@ class AlertDispatcher(
         // Written into the session before the UI state changes, so the record exists
         // even if the process dies in the next second.
         if (!result.suppressed) {
-            recorder.noteGuardiansNotified(result.outcome.reached)
+            // Everyone the message was actually put on the wire for, confirmed or not.
+            // Recording only the confirmed would lose the person whose text was in
+            // flight when the signal dropped.
+            recorder.noteGuardiansNotified(result.outcome.attempted)
             recorder.addAudioEvent(
                 label = result.summaryLine,
                 decibels = null,
@@ -102,16 +123,12 @@ class AlertDispatcher(
             )
         }
 
-        // After the text, never before. The text carries the location link and survives
-        // an unanswered phone; if the dial were first, a guardian could pick up with no
-        // address and the process could die before the SMS ever went out.
-        //
         // Deliberately *not* gated on `result.suppressed`. A suppressed duplicate means
         // the same-tier text already went out — it says nothing about whether a phone
         // ever rang. Someone who says her emergency codeword a second time because
         // nothing visibly happened is exactly the person who needs another attempt, and
-        // `calledThisSession` below is what stops a live call being torn down.
-        placeCallIfWarranted(tier)
+        // `calledThisSession` is what stops a live call being torn down.
+        call.await()
 
         guardianRepository.dispatchAlert(tier)
         Log.i(TAG, result.summaryLine)

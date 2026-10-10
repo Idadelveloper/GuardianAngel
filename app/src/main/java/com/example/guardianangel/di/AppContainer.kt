@@ -81,6 +81,9 @@ interface AppContainer {
      */
     val alertDispatcher: com.example.guardianangel.domain.alert.AlertDispatcher
 
+    /** Names a recording once it is finished. See `SessionSummaryAgent`. */
+    val summaryAgent: com.example.guardianangel.agent.SessionSummaryAgent
+
     /** The signed-in user's id, for anything scoped to them. */
     suspend fun currentUserId(): String
 
@@ -162,6 +165,9 @@ class InMemoryAppContainer(
             currentLocation = { null },
             sessionEntries = { emptyList() },
         )
+
+    override val summaryAgent =
+        com.example.guardianangel.agent.SessionSummaryAgent(activityRepository)
 
     override suspend fun onAuthenticated(user: AuthUser) = Unit
 

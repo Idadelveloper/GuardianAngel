@@ -62,6 +62,14 @@ enum class GuardianCapability(
             "alert. This is the one worth doing first.",
         fixLabel = "Add a guardian",
     ),
+
+    SilentAlerts(
+        summary = "Text your guardians without you tapping send",
+        missingDetail = "Right now an alert opens your messaging app and waits for you " +
+            "to tap send — which is no use if your phone is in your pocket or someone " +
+            "has taken it. Let me send the text myself.",
+        fixLabel = "Allow sending texts",
+    ),
 }
 
 /**
@@ -93,6 +101,9 @@ data class GuardianSetup(
             // The microphone first: without it nothing else in this list does anything.
             GuardianCapability.MicrophoneAccess,
             GuardianCapability.GuardianAlerts,
+            // Directly above location: an alert nobody taps send on never arrives at
+            // all, which is worse than one that arrives without an address.
+            GuardianCapability.SilentAlerts,
             GuardianCapability.LocationSharing,
             GuardianCapability.CodewordActions,
             GuardianCapability.HandsFree,
@@ -119,6 +130,7 @@ fun guardianSetup(
     hasMicrophonePermission: Boolean,
     customisedCodewordCount: Int,
     guardianCount: Int,
+    canSendSilently: Boolean,
 ): GuardianSetup = GuardianSetup(
     ready = buildSet {
         // The microphone is the floor for everything spoken. Without it a wake word is
@@ -132,5 +144,10 @@ fun guardianSetup(
         // brand-new account's four suggestions as configured codewords.
         if (customisedCodewordCount > 0) add(GuardianCapability.CodewordActions)
         if (guardianCount > 0) add(GuardianCapability.GuardianAlerts)
+        // Not conditioned on having a guardian: the permission either exists or it does
+        // not. With an empty circle `GuardianAlerts` outranks this in PRIORITY, so the
+        // card still says "add a guardian" first rather than asking for permission to
+        // text nobody.
+        if (canSendSilently) add(GuardianCapability.SilentAlerts)
     }
 )

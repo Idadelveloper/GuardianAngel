@@ -23,6 +23,8 @@ class AndroidPermissionProbe(private val context: Context) : PermissionProbe {
 
     override fun hasLocation(): Boolean = granted(Manifest.permission.ACCESS_FINE_LOCATION)
 
+    override fun hasSendSms(): Boolean = granted(Manifest.permission.SEND_SMS)
+
     override fun isBatteryExempt(): Boolean =
         context.getSystemService(PowerManager::class.java)
             ?.isIgnoringBatteryOptimizations(context.packageName) == true

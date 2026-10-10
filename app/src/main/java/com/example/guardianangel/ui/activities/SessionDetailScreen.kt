@@ -35,6 +35,7 @@ import com.example.guardianangel.domain.model.DiarizedEntry
 import com.example.guardianangel.domain.model.SessionTrail
 import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.SpeakerKind
+import com.example.guardianangel.domain.session.SessionNarrator
 import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.components.GuardianOutlinedButton
@@ -264,6 +265,40 @@ fun SessionDetailScreen(
             }
         }
 
+        // --- Key moments ------------------------------------------------------------
+        //
+        // Derived here rather than stored, like the trail's incidents: what counts as
+        // notable changes as the heuristics improve, and a recording made last month
+        // should benefit from today's reading of it.
+        val narrative = remember(session.id, session.entries) {
+            SessionNarrator.narrate(
+                startedAtMillis = session.startedAtEpochMillis,
+                endedAtMillis = session.endedAtEpochMillis,
+                entries = session.entries,
+                locationLabel = session.locationLabel,
+                triggeredTierName = session.triggeredByTier?.name,
+                guardiansNotified = session.guardiansNotified,
+                lowestSafetyScore = session.lowestSafetyScore,
+            )
+        }
+        if (narrative.keyMoments.isNotEmpty()) {
+            GuardianCard(contentPadding = GuardianTheme.spacing.lg) {
+                SectionHeader(title = "Key moments", icon = GuardianIcons.Activity)
+                Spacer(Modifier.height(GuardianTheme.spacing.sm))
+                Text(
+                    text = "The points worth jumping to, timed from the start of the " +
+                        "recording.",
+                    style = GuardianTheme.type.labelSm,
+                    color = GuardianTheme.materialColors.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(GuardianTheme.spacing.md))
+                narrative.keyMoments.forEach { moment ->
+                    KeyMomentRow(moment = moment)
+                    Spacer(Modifier.height(GuardianTheme.spacing.sm))
+                }
+            }
+        }
+
         // --- Where it happened ------------------------------------------------------
         //
         // The real breadcrumb trail. This drew `RouteCanvas(routes = emptyList())` — an
@@ -433,5 +468,58 @@ private fun SessionDetailPreview() {
             trail = SessionTrail("preview", emptyList(), emptyList()),
             onBack = {}, onExport = {},
         )
+    }
+}
+
+/**
+ * One moment in a recording, with how far into it the moment was.
+ *
+ * The offset rather than a clock time: "04:12" is how you find a point in a recording,
+ * and "11:47 PM" is not, even though the absolute time is what the database stores.
+ */
+@Composable
+private fun KeyMomentRow(
+    moment: SessionNarrator.KeyMoment,
+    modifier: Modifier = Modifier,
+) {
+    val accent = when (moment.severity) {
+        SessionNarrator.Severity.Alarming -> GuardianTheme.materialColors.error
+        SessionNarrator.Severity.Notable -> GuardianTheme.colors.accentWarm
+        SessionNarrator.Severity.Routine -> GuardianTheme.materialColors.onSurfaceVariant
+    }
+    Row(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = formatOffset(moment.offsetMillis),
+            style = GuardianTheme.type.labelSm,
+            color = accent,
+            modifier = Modifier.width(52.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = moment.label,
+                style = GuardianTheme.type.labelMd,
+                color = GuardianTheme.materialColors.onSurface,
+            )
+            if (moment.detail.isNotBlank()) {
+                Text(
+                    text = moment.detail,
+                    style = GuardianTheme.type.bodySm,
+                    color = GuardianTheme.materialColors.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** `mm:ss`, or `h:mm:ss` once a recording runs past an hour. */
+private fun formatOffset(offsetMillis: Long): String {
+    val totalSeconds = offsetMillis / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%02d:%02d".format(minutes, seconds)
     }
 }

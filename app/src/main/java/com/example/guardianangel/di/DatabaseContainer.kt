@@ -249,6 +249,9 @@ class DatabaseAppContainer(
         },
     )
 
+    override val summaryAgent =
+        com.example.guardianangel.agent.SessionSummaryAgent(activityRepository)
+
     override val angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator by lazy {
         com.example.guardianangel.agent.AngelAgentOrchestrator(crimeDataService, scope)
     }

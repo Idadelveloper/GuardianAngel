@@ -25,6 +25,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = false,
             customisedCodewordCount = 0,
             guardianCount = 0,
+            canSendSilently = false,
         )
         assertTrue(setup.ready.isEmpty())
         assertFalse(setup.isComplete)
@@ -40,6 +41,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 4,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertTrue("Still reporting ${setup.missing}", setup.isComplete)
         assertEquals(null, setup.mostImportantMissing)
@@ -57,6 +59,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 4,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertFalse(GuardianCapability.VoiceMatch in setup.ready)
         assertFalse(GuardianCapability.HandsFree in setup.ready)
@@ -73,6 +76,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 4,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertTrue(GuardianCapability.HandsFree in setup.ready)
         assertFalse(GuardianCapability.VoiceMatch in setup.ready)
@@ -90,6 +94,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 0,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertFalse(GuardianCapability.CodewordActions in setup.ready)
         assertTrue(GuardianCapability.CodewordActions in setup.missing)
@@ -106,6 +111,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = false,
             customisedCodewordCount = 4,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertFalse(GuardianCapability.HandsFree in setup.ready)
         assertFalse(GuardianCapability.MicrophoneAccess in setup.ready)
@@ -125,6 +131,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = false,
             customisedCodewordCount = 0,
             guardianCount = 0,
+            canSendSilently = false,
         )
         // Nothing else in the list does anything without it, so asking for a guardian
         // first would be asking her to set up a feature that cannot run.
@@ -143,6 +150,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 0,
             guardianCount = 0,
+            canSendSilently = false,
         )
         assertEquals(
             "An alert with nobody to send it to is the next worst gap",
@@ -162,6 +170,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 4,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertEquals(
             GuardianCapability.LocationSharing,
@@ -178,6 +187,7 @@ class GuardianSetupTest {
             hasMicrophonePermission = true,
             customisedCodewordCount = 1,
             guardianCount = 1,
+            canSendSilently = true,
         )
         assertTrue(GuardianCapability.CodewordActions in setup.ready)
     }

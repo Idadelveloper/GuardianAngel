@@ -453,6 +453,20 @@ object GuardianIcons {
         }
     }
 
+    /**
+     * Straight ahead. Rotated by the walking directions card to make every other turn,
+     * so the arrow's angle always agrees with the words beside it.
+     */
+    val ArrowUp: ImageVector by lazy {
+        strokeIcon("ArrowUp") {
+            moveTo(12f, 19.75f)
+            lineTo(12f, 4.25f)
+            moveTo(5.75f, 10.5f)
+            lineTo(12f, 4.25f)
+            lineTo(18.25f, 10.5f)
+        }
+    }
+
     /** Safe Walk. */
     val Walk: ImageVector by lazy {
         strokeIcon("Walk") {

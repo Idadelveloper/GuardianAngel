@@ -208,6 +208,11 @@ class FakeActivityRepository : ActivityRepository {
     override fun observeTrailPaths() =
         state.map { sessions -> sessions.associate { it.id to SAMPLE_PATH } }
 
+    override suspend fun updateNarrative(sessionId: String, title: String, summary: String) =
+        state.update { list ->
+            list.map { if (it.id == sessionId) it.copy(title = title, summary = summary) else it }
+        }
+
     override suspend fun exportSession(sessionId: String): String {
         delay(800)
         return "guardian-angel-$sessionId.pdf"

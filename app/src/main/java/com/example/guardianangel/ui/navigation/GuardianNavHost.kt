@@ -252,7 +252,9 @@ private fun NavGraphBuilder.mainGraph(
                 safetyDataSource = container.berkeleySafetyDataSource,
                 placesSearchProvider = container.placesSearchProvider,
                 weatherProvider = container.weatherProvider,
-                onJourneyStarted = { navController.navigateToTab(Routes.HOME) },
+                // Stays on the map. Starting a walk used to jump to Home, which is the
+                // one screen that does not show the route she had just chosen to follow.
+                onJourneyStarted = {},
             )
         }
         composable(Routes.ACTIVITIES, enterTransition = { fadeThrough() }, exitTransition = { fadeAway() }) {

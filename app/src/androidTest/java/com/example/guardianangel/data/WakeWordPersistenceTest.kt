@@ -40,6 +40,7 @@ class WakeWordPersistenceTest {
         override fun hasMicrophone() = true
         override fun hasNotifications() = true
         override fun hasLocation() = true
+        override fun hasSendSms() = true
         override fun isBatteryExempt() = true
     }
 

@@ -1,35 +1,33 @@
 # Guardian Angel — agent instructions
 
-A women's-safety Android app (Kotlin, Jetpack Compose). The user says a **wake word**;
-the app starts recording, transcribes and interprets the situation on-device, and alerts
-chosen guardians with her location if things are genuinely escalating. Target users:
-women 18+, alone and uneasy.
+A women's-safety Android app (Kotlin, Jetpack Compose). She says a **wake word**; the
+app records, transcribes and interprets on-device, and alerts her guardians with her
+location if things are genuinely escalating. Target users: women 18+, alone and uneasy.
 
-This file is the canonical context for **every** coding agent on this repo. Codex reads
-it directly; Junie reads it and adds `.junie/playbook.md`; Gemini imports it from
-`GEMINI.md`; Claude Code loads it via `.claude/skills/guardian-angel-context`. Keep the
-shared facts **here** — the per-agent files are thin on purpose, because this project has
-already been bitten by a context file that drifted out of date.
+Canonical context for **every** coding agent here. Codex reads it directly; Junie adds
+`.junie/playbook.md`; Gemini imports it from `GEMINI.md`; Claude Code loads it via
+`.claude/skills/guardian-angel-context`. Keep shared facts **here** — per-agent files are
+thin on purpose, this project having already been bitten by a context file that drifted
+out of date. Kept under 32 KiB, Codex's file cap: adding a section means trimming one.
 
-Deeper references: `README.md` (product), `docs/SPEECH_STACK.md` (model choices and
-benchmarks), `docs/DATA_AND_AUTH.md` (storage and auth).
+Deeper references: `README.md` (product), `docs/SPEECH_STACK.md` (models and benchmarks),
+`docs/DATA_AND_AUTH.md` (storage and auth).
 
 ## Verify your work
 
 ```bash
 ./gradlew :app:assembleDebug
-./gradlew :app:testDebugUnitTest        # 34 tests; includes the WCAG contrast guard
-./gradlew :app:connectedDebugAndroidTest  # 20 tests; needs a device — these are the real proof
+./gradlew :app:testDebugUnitTest        # 190 tests; includes the WCAG contrast guard
+./gradlew :app:connectedDebugAndroidTest  # 58 tests; needs a device — the real proof
 ./gradlew :app:lintDebug
 ```
 
-Both test suites pass on `main`. **If you touch audio, run the instrumented suite** — it
-is the only thing that has ever caught a real bug in this area, and it has caught several
-that every unit test passed over.
+Both suites pass on `main`. **If you touch audio, run the instrumented suite** — it is
+the only thing that has ever caught a real bug there.
 
 Toolchain: AGP 9.4.1, Kotlin 2.2.10, KSP 2.2.10-2.0.2, Compose BOM 2026.02.01, Room
-2.8.5, minSdk 24 / targetSdk 37. Two pins are deliberate: **LiteRT 1.4.2** and **Firebase
-BoM 34.19.0** — the newer majors are compiled with Kotlin 2.4 metadata and will not
+2.8.5, minSdk 24 / targetSdk 37. Three pins are deliberate — **LiteRT 1.4.2**, **Firebase
+BoM 34.19.0**, **Places 4.4.1**: the newer majors carry Kotlin 2.4 metadata and will not
 resolve against Kotlin 2.2.10. `android.disallowKotlinSourceSets=false` in
 `gradle.properties` is required for KSP under AGP 9; do not remove it.
 
@@ -39,9 +37,8 @@ resolve against Kotlin 2.2.10. `android.disallowKotlinSourceSets=false` in
    obvious panic button. A change that makes activation more conspicuous is wrong.
 2. **Tolerant of mistakes.** Codewords are ordinary words and will be said by accident.
    Escalation is always cancellable; stopping is one tap with no confirm dialog.
-3. **Calm.** The user may already be frightened. Blush white and soft rose, never alarm
-   red as a default. Micro-interactions breathe, never strobe — except Angel's critical
-   tier, where the strobe is the point.
+3. **Calm.** She may already be frightened. Blush white and soft rose, never alarm red by
+   default. Micro-interactions breathe, never strobe — except Angel's critical tier.
 
 When a decision is genuinely ambiguous, these beat visual novelty.
 
@@ -55,12 +52,12 @@ When a decision is genuinely ambiguous, these beat visual novelty.
 | Types | `WakeWord`, `ListeningRepository` | `Codeword`, `CodewordRepository` |
 | Set in | onboarding step 4 · Settings → Wake word | onboarding step 5 · Settings → Codewords |
 
-Separate types, repositories and screens, on purpose. A user who believes her danger
-codeword wakes the app would say it into a phone that is not listening. Never merge them;
-never let one screen offer both.
+Separate types, repositories and screens, on purpose: a user who believes her danger
+codeword wakes the app would say it into a phone that is not listening. Never merge them.
 
-`CodewordTier` order is always `Safe` → `Caution` → `Danger` → `Emergency` (cancel false
-alarm · transcribe silently · alert circle + location · call 911 + alert circle). Sort by
+`CodewordTier` order is always `Safe` → `Caution` → `Danger` → `Emergency`: cancel a
+false alarm · transcribe silently · text the whole circle with a location · that plus a
+call to the first guardian. **Emergency does not dial 911** — see below. Sort by
 `CodewordTier.entries`, never by whatever the data layer returns.
 
 ## What Android actually allows for hands-free listening
@@ -68,14 +65,15 @@ alarm · transcribe silently · alert circle + location · call 911 + alert circ
 Load-bearing platform facts. Do not design around wishes:
 
 - `RECORD_AUDIO` is while-in-use. Background listening needs a `microphone` foreground
-  service plus `FOREGROUND_SERVICE_MICROPHONE` (Android 14+).
+  service plus `FOREGROUND_SERVICE_MICROPHONE` (Android 14+), and a persistent
+  notification.
 - **The FGS cannot be started from the background** — not on boot, not from a broadcast
   (`ForegroundServiceStartNotAllowedException`). Angel cannot arm herself; the user arms
-  her from a visible screen. "Arm before you set off" is the only legal model, and the UI
-  says so rather than implying otherwise.
-- Once started legally it *does* keep capturing with the app closed and the screen locked.
-- A persistent notification is mandatory.
-- `AlwaysOnHotwordDetector` / SoundTrigger is default-assistant only. Not available to us.
+  her from a visible screen, and the UI says so rather than implying otherwise. Once
+  started legally it *does* keep capturing with the app closed and the screen locked.
+- **Nor can an activity be started from the background**, which is why an emergency call
+  falls back to a notification whose tap dials.
+- `AlwaysOnHotwordDetector` / SoundTrigger is default-assistant only. Not available.
 
 ## Invariants that were paid for in bugs
 
@@ -83,34 +81,27 @@ Each of these cost a real, silent failure. Treat them as contracts, not preferen
 
 ### One embedding window, everywhere — 1.5 s
 
-CAM++ speaker embeddings are **only comparable between inputs of similar duration**.
-Measured on a Pixel 7a, one speaker, one sentence:
+CAM++ embeddings are **only comparable between inputs of similar duration**. Measured on
+a Pixel 7a, one speaker, one sentence: fixed 1.5 s windows score 0.79 mean / 0.61 worst,
+but the *same speech* at 1 s vs 2 s scores **−0.03**, and at 1.5 s vs 3 s only **0.24** —
+indistinguishable from silence vs speech (−0.02).
 
-| Comparison | Cosine |
-|---|---|
-| Fixed 1.5 s windows, same speaker | 0.79 mean / 0.61 worst |
-| Same speech at 1 s vs 2 s | **−0.03** |
-| Same speech at 1.5 s vs 3 s | **0.24** |
-| Silence vs speech | −0.02 |
-
-The first implementation trimmed takes to variable length, enrolled on 3 s segments and
-verified a 1.5 s pre-roll. Every component passed its own tests and the voice gate would
-have rejected the enrolled user **on every wake**.
+The first implementation enrolled on 3 s segments and verified a 1.5 s pre-roll. Every
+component passed its own tests and the voice gate would have rejected the enrolled user
+**on every wake**.
 
 `SherpaSpeakerIdentifier.EMBED_WINDOW_SAMPLES` is the single window length for enrolment,
-wake-word verification and diarization. Always produce embeddings via `embedSpeech()` /
+wake-word verification and diarization. Always embed via `embedSpeech()` /
 `speechWindow()` (which slides a fixed window to the densest speech), never by trimming
-to variable length. If the pre-roll length changes, the enrolment window changes with it.
-`VoiceVerificationTest.everyEmbeddingUsesTheSameWindow` guards this.
+to variable length. `VoiceVerificationTest.everyEmbeddingUsesTheSameWindow` guards it.
 
 ### Native teardown must be ordered
 
 Launching a flush and then freeing the model crashes the process natively. `stop()` /
 `release()` on `GuardianAudioSession` are `suspend`: they `cancelAndJoin()` the capture
-job, await `transcriber.finish()`, and only then `close()` the models.
-`GuardianListeningService` runs teardown on a separate `teardownScope` because it cancels
-its working `scope`. `SherpaTranscriber` and `SherpaSpeakerIdentifier` also guard every
-native call with `synchronized(nativeLock)` so an ordering mistake degrades instead of
+job, await `transcriber.finish()`, then `close()` the models. The service runs teardown
+on a separate `teardownScope` because it cancels its working `scope`. Every native call
+is guarded with `synchronized(nativeLock)` so an ordering mistake degrades instead of
 segfaulting. Any new model wrapper does the same.
 
 **When a test fails with an empty message, check logcat for `F DEBUG` tombstone lines**
@@ -118,150 +109,154 @@ before assuming an assertion — a native crash looks like nothing from the Kotl
 
 ### Permissions are probed, never cached
 
-`PermissionProbe` reads the system on every status emission. Caching a snapshot pushed in
-from the UI meant every fresh process assumed nothing was granted, so Home nagged the
-user to grant permissions she had already granted in onboarding. Never reintroduce a
-stored copy of permission state; `refreshPermissions()` is a "look again" nudge, not a
-setter.
+`PermissionProbe` reads the system on every status emission. A snapshot pushed in from
+the UI meant every fresh process assumed nothing was granted, so Home nagged her to grant
+what she had already granted in onboarding. Never reintroduce a stored copy;
+`refreshPermissions()` is a "look again" nudge, not a setter.
 
 ### The voice gate degrades off, never on
 
-`WakeWord.requireVoiceMatch` is a **request**. `GuardianListeningService` gates on the
-voiceprint only when `VoiceProfile.isUsable` (clarity ≥ 55, derived from how well the
-enrolment takes agreed with each other). Gating on a bad voiceprint does not keep a
-stranger out — it stops Angel waking for the person she belongs to, which is the one
-failure this feature must never have. The UI states what is *actually* happening, not
-what the toggle is set to.
+`WakeWord.requireVoiceMatch` is a **request**. The service gates on the voiceprint only
+when `VoiceProfile.isUsable` (clarity ≥ 55, from how well the enrolment takes agreed).
+Gating on a bad voiceprint does not keep a stranger out — it stops Angel waking for the
+person she belongs to. The UI states what is *actually* happening, not what the toggle
+says.
 
 ### The wake-word tokenizer is unigram, not BPE
 
-`SentencePieceTokenizer` uses **Viterbi segmentation** over `bpe.model` (which carries the
-piece scores — `tokens.txt` does not). Greedy longest-match matched sherpa's reference on
-7 of 9 phrases and the wake word never once fired. Viterbi is 9/9 exact. Load from
-`bpe.model`; validate a typed phrase with `canUseWakePhrase` before saving, because an
-unrepresentable phrase saves fine, looks set up, and never fires.
+`SentencePieceTokenizer` uses **Viterbi segmentation** over `bpe.model` (which carries
+the piece scores — `tokens.txt` does not). Greedy longest-match matched sherpa's
+reference on 7 of 9 phrases and the wake word never once fired; Viterbi is 9/9. Validate
+a typed phrase with `canUseWakePhrase` before saving — an unrepresentable phrase saves
+fine, looks set up, and never fires.
 
 ### Codewords go through the gate, never straight from a transcript match
 
-`CodewordGate` (`domain/codeword/`) decides whether a spoken codeword does anything. Pure
-and time-injected, so all of it is unit-tested. Four rules, each paid for:
+`CodewordGate` (`domain/codeword/`) decides whether a spoken codeword does anything.
+Pure and time-injected, so all of it is tested. Four rules, each paid for:
 
-- **Once per utterance.** Matching runs over a rolling transcript window, so one phrase
-  appears in many consecutive evaluations. Firing per evaluation meant tens of alerts
-  from one word.
-- **It has to be her.** Decided per *chunk* from `TranscriptChunk.isEnrolledUser`, not
-  from a session-wide flag. `null` means *undecidable*, never "someone else":
-  unverifiable voices may start recording (Caution) but may not alert anyone or cancel an
-  alert.
+- **Once per utterance.** Matching runs over a rolling window, so one phrase appears in
+  many consecutive evaluations; firing per evaluation meant tens of alerts from one word.
+- **It has to be her.** Per *chunk*, from `TranscriptChunk.isEnrolledUser`. `null` means
+  *undecidable*, never "someone else": unverifiable voices may start recording (Caution)
+  but may not alert anyone or cancel an alert.
 - **Acting on people waits.** Danger holds 10 s, Emergency 4 s, so an accident can be
-  taken back. The service's watchdog polls `dueForDispatch()`; nothing dispatches from
-  the transcript callback.
+  taken back. The watchdog polls `dueForDispatch()`; nothing dispatches from the
+  transcript callback.
 - **Safe cancels anything pending**, which is what makes the hold worth having.
 
-`CodewordGateTest` pins twenty cases. Never add a path that calls `dispatchAlert`
-directly from a transcript match.
+Matching is fuzzy in three passes (exact → space-insensitive → length-scaled
+Levenshtein) so a mispronounced codeword still fires. `CodewordGateTest` pins 27 cases.
+Never call `dispatchAlert` directly from a transcript match.
 
 ### Per-chunk speaker attribution
 
 `SherpaSpeakerIdentifier.attribute()` returns the cluster tag *and* whether it was the
-enrolled user, from one embedding. `SherpaTranscriber.attributeSpeaker` is the hook, wired
-by the session so one 28 MB speaker model serves the wake-word gate, diarization and
-per-line attribution.
+enrolled user, from one embedding; `SherpaTranscriber.attributeSpeaker` is the hook, so
+one 28 MB model serves the wake-word gate, diarization and per-line attribution. It
+replaced a session-wide `hasUnknownVoice()` flag under which, once any stranger spoke,
+every later line *of hers* read as not-her. Codeword actions hang off this.
 
-This replaced `!speakers.hasUnknownVoice()`, a session-wide flag: once any stranger had
-spoken, every later line *of hers* read as not-her, and until then a stranger's words
-read as hers. Codeword actions hang off this.
+Unknown voices are transcribed and stored like any other, labelled "Unfamiliar voice";
+`null` is undecidable and renders as the neutral "Speaker". Those two look identical in a
+transcript, so `attribute()` logs the cosine score — without it a mis-labelled transcript
+cannot be told from a model that failed to load.
 
 ### Sessions are written as they happen, never buffered
 
-`SessionRecorder` / `RoomSessionRecorder` writes each line, sound and breadcrumb as it is
-decoded, because the moments worth recording are the moments something might kill the
-process. A session with no `endedAt` is honest, not broken, and the insights say so.
-
-Every method swallows its own failures: losing a line is survivable, throwing back into
-the capture loop and stopping the recording is not.
+`RoomSessionRecorder` writes each line, sound and breadcrumb as it is decoded, because
+the moments worth recording are the moments something might kill the process. A session
+with no `endedAt` is honest, not broken. Every method swallows its own failures: losing a
+line is survivable, throwing into the capture loop is not.
 
 `RoomActivityRepository` derives analytics on read, so deleting a session immediately
-stops it counting. It replaced `FakeActivityRepository`, which served three invented
-incidents to every account. **An account with no recordings must show nothing** — an app
-that displays imaginary evidence teaches the user its records cannot be trusted.
+stops it counting. **An account with no recordings must show nothing** — imaginary
+evidence teaches the user its records cannot be trusted.
 
 `FileTranscriptExporter` writes real text to `getExternalFilesDir("exports")` and states
-its own provenance (machine-transcribed, unreviewed, labels are guesses). The previous
-implementation returned `"guardian-angel-<id>.pdf"` and wrote nothing.
+its provenance (machine-transcribed, unreviewed, labels are guesses).
 
 ### Breadcrumb trails draw themselves when there is no Maps key
 
 With the placeholder key the Maps SDK does not error — it composes a map, draws the
-Google watermark and renders **nothing**. An empty box in every Activity row reads as a
-loading bug, so `MapsAvailability.hasMapKey()` is checked first and `TrailCanvas` draws
-the path instead: fitted to the bounding box, longitude scaled by `cos(latitude)` so
-walks are not stretched, and coloured segment by segment by the score at that moment.
+watermark and renders **nothing**. An empty box in every Activity row reads as a loading
+bug, so `MapsAvailability.hasMapKey()` is checked first and `TrailCanvas` draws the path
+instead: fitted to the bounding box, longitude scaled by `cos(latitude)`, coloured
+segment by segment by the score at that moment.
 
 When a key *is* present:
 
 - **List rows use lite mode** (`liteMode(true)`): a bitmap, not a GL surface, which is
-  what makes one per row affordable. Its default tap opens the Maps app, so the preview
-  is wrapped in its own click target.
+  what makes one per row affordable. Its default tap opens the Maps app, so wrap the
+  preview in its own click target.
 - **The detail map has every gesture disabled.** It sits in a vertical scroll, and a drag
-  meant for the page moved the camera off the route with no way back. "Open in Maps" is
-  the way out.
+  meant for the page moved the camera off the route with no way back.
 - **Tapping a marker selects the incident row below it.** `MarkerInfoWindow` rasterises
   Compose content and does not reliably draw inside a clipped non-interactive map; the
   list is also what a screen reader can reach.
 
-Incidents are **derived on read** by `TrailBuilder`, never stored: what counts as notable
-changes as the heuristics improve, and a session recorded last month should benefit from
-today's understanding of it. Events further than 45 s from any breadcrumb are dropped
-rather than placed — a marker an unknown distance from the event is read as precise.
-Events within 20 s of each other collapse to the most severe, so a codeword is never
-hidden behind a flagged sentence. `TrailBuilderTest` pins all of it.
+Incidents are **derived on read** by `TrailBuilder`, never stored. Events further than
+45 s from any breadcrumb are dropped rather than placed — a marker an unknown distance
+from the event is read as precise. Events within 20 s collapse to the most severe, so a
+codeword is never hidden behind a flagged sentence. `TrailBuilderTest` pins it.
 
 ### Recording is not danger
 
-`AngelMood.fromScore(inDuress = …)` takes an *actual* duress trigger, not "is recording".
-Passing `isRecording` pinned Angel to her Critical strobe for every recording, including
-one started by a tap on a quiet street. Her mood tracks the live safety score, which is
-an average of several factors and moves in real time.
+`AngelMood.fromScore(inDuress = …)` takes an *actual* duress trigger, not "is recording",
+which pinned Angel to her Critical strobe for every recording including one started by a
+tap on a quiet street. Her mood tracks the live safety score.
 
 The live transcript card sits **below** the hero for the same reason: a panel that takes
 over the top of the screen says "emergency", and recording often is not one.
 
 ### A recording left running stands itself down
 
-The service watchdog stops a session after 30 minutes with no speech and no danger sound.
+The watchdog stops a session after 30 min with no speech and no danger sound.
 A recording forgotten in a bag is a battery and privacy problem, and the user who forgot
 it is least likely to notice. Speech and danger events reset the timer, so an incident
 cannot time out mid-way.
 
 ### Alerting a guardian goes through one path
 
-The SOS hold and a spoken codeword are the same event. They used to reach different code
-— the button only flipped in-memory UI state — so a duress hold looked like an alert and
-sent nothing. Both now call `AlertDispatcher.dispatch(tier)`, which composes, sends,
-records the outcome in the session and updates UI state. **Never call `dispatchAlert`
-directly from a trigger.**
+The SOS hold and a spoken codeword are the same event; the button used to only flip
+in-memory UI state, so a duress hold looked like an alert and sent nothing. Both now call
+`AlertDispatcher.dispatch(tier)`, which composes, sends, records the outcome in the
+session and updates UI state. **Never call `dispatchAlert` directly from a trigger.**
 
 `GuardianNotificationAgent` owns the judgement: Caution reaches the top guardian only
 (waking five people because a recording started teaches them to ignore the next one),
 Danger and Emergency reach everyone in priority order, an already-sent tier is suppressed
-unless it escalated, and Safe is never suppressed — the people woken are owed the
-all-clear. A *failed* send is not remembered as sent, or one failure would silence the
-rest of the session. `GuardianNotificationAgentTest` pins it.
+unless it escalated, Safe is never suppressed — the people woken are owed the all-clear.
+A *failed* send is not remembered as sent. `GuardianNotificationAgentTest` pins it.
 
 `SmsGuardianNotifier` uses SMS: it works on one bar with no data, needs no app on the
 receiving end, and lands on a lock screen. **`SEND_SMS` is restricted on Google Play**;
 the policy lists "Physical safety/emergency alerts to send SMS" as an eligible exception,
-declared through the Permissions Declaration Form before release. Without it the
-messaging app opens pre-filled — no permission, but a tap — so `canSendSilently` drives
-copy saying which she has. `telephony` stays `required="false"` or the app will not
-install on tablets.
+declared through the Permissions Declaration Form before release. Keep `telephony`
+`required="false"` or the app will not install on tablets.
+
+**Ask for `SEND_SMS`, loudly.** Nothing in the app ever requested it, so every alert
+silently took the fallback while the user believed texts were going out. It is now
+`GuardianCapability.SilentAlerts`, ranked just below having a guardian at all, and asked
+for on the onboarding circle step. A permission the UI never requests is a feature that
+does not exist.
+
+**Handing a message to `SmsManager` is not sending it.** With null sent-intents, flight
+mode, a dead SIM and a rejected message all looked like success. Sends carry
+`PendingIntent` receipts and `NotifyOutcome` has three states: `reached`, `failed`, and
+`unconfirmed` (no answer in eight seconds). Never fold `unconfirmed` into `reached`.
+
+Without the permission the fallback opens a pre-filled composer: WhatsApp for a single
+guardian, otherwise the SMS composer addressed to everyone at once. **WhatsApp cannot
+send on the user's behalf** — Meta offers no personal-account API, only the Business
+Cloud API from a business number with approved templates; unofficial libraries get
+accounts banned. One tap, not zero, and nothing may call it sent. The manifest
+`<queries>` block is load bearing or `getPackageInfo` always throws.
 
 `AlertComposer` writes the message: who, then where, then why. The location is a plain
 `https://www.google.com/maps/...` link — `geo:` URIs are not tappable in most SMS
-clients. Alarming lines are **quoted, never paraphrased**: a summary softening "he grabbed
-my arm" into "an altercation" has edited evidence. A missing location is stated, not
-omitted.
+clients. Alarming lines are **quoted, never paraphrased**: softening "he grabbed my arm"
+into "an altercation" edits the evidence. A missing location is stated, not omitted.
 
 **No alert claims emergency services have been called.** Nothing in the app dials one,
 and no message says one was dialled. An automated 911 call on a false trigger is a
@@ -271,28 +266,26 @@ alert into a fatal one.
 
 ### Emergency rings one guardian; every other tier only texts
 
-`EmergencyCallPolicy` is pure and decides *whether*: Emergency only, one guardian (lowest
-`priority` with a number), never twice in a session, off entirely if the user cleared
-`users.callGuardianOnEmergency`. Caution ringing a phone would get the feature switched
-off within a week, and then nothing rings on the night it matters.
+`EmergencyCallPolicy` is pure and decides *whether*: Emergency only, one guardian
+(lowest `priority` with a number), never twice in a session, off entirely if the user
+cleared `users.callGuardianOnEmergency`. Caution ringing a phone would get the feature
+switched off within a week, and then nothing rings on the night it matters.
 
-`TelephonyGuardianCaller` does it, and the hard part is that dialling means **starting an
-activity**, which Android forbids an app with no visible window — exactly the locked-in-a-
-pocket case this exists for, and it fails silently with no exception to catch. So:
-app visible → `ACTION_CALL` directly; app backgrounded → a max-priority call notification
-whose tap dials, since a notification tap is a documented exception to the background
-rule. A full-screen intent is attached only when `canUseFullScreenIntent()` agrees —
-Android 14 grants that automatically to dialler and alarm apps only.
+`TelephonyGuardianCaller` does it. The hard part: dialling means **starting an activity**,
+which Android forbids an app with no visible window — exactly the locked-in-a-pocket case
+this exists for, and it fails silently with no exception to catch. So app visible →
+`ACTION_CALL`; app backgrounded → a max-priority call notification whose tap dials, a
+notification tap being a documented exception. A full-screen intent is attached only when
+`canUseFullScreenIntent()` agrees; Android 14 grants it to dialler and alarm apps only.
 
-`Outcome.Dialling` and `Outcome.AwaitingTap` are **never flattened into one**. A posted
-notification is not a placed call, only `Dialling` sets the session's already-called flag,
-and the session note for a tap says "tap to connect". The call is placed *after* the text,
-which carries the location and survives an unanswered phone. `AlertDispatcherCallTest`
-pins all of it.
+`Outcome.Dialling` and `Outcome.AwaitingTap` are **never flattened into one**: a posted
+notification is not a placed call, only `Dialling` sets the already-called flag, and the
+session note for a tap says "tap to connect". The call runs in parallel with the text's
+delivery confirmation, not after it — the message reaches the radio in milliseconds and
+only the network's *answer* takes seconds. `AlertDispatcherCallTest` pins it.
 
-`TranscriptSummariser` is deterministic on purpose: an on-device LLM costs seconds and
-~1 GB of RAM, and a cloud call needs connectivity that fails exactly where this matters.
-`AiTranscriptSummariser` is the seam for a model-written version — it should enrich the
+`TranscriptSummariser` is deterministic for the same reasons as `SessionNarrator` below.
+`AiTranscriptSummariser` is the seam for a model-written version — it may enrich the
 stored session *after* the alert, never block it.
 
 ### Map pins are drawn, anchored, and never emoji
@@ -304,26 +297,58 @@ Hazards carry their count and grow slightly with it: "3 reported" and "40 report
 different places. Bitmaps are cached per (kind, badge, scale) — a map re-renders on every
 camera move.
 
-Always pass `anchor = PIN_ANCHOR`, which comes from `GuardianMapMarkers.ANCHOR_X/Y` and is
-derived from the drawing geometry. Without it the SDK centres the bitmap on the
-coordinate and every pin sits half its height north of the thing it marks.
+Always pass `anchor = PIN_ANCHOR` (from `GuardianMapMarkers.ANCHOR_X/Y`, derived from the
+drawing geometry). Without it the SDK centres the bitmap on the coordinate and every pin
+sits half its height north of what it marks.
 
 `AngelLocationMarker` holds **one** `MarkerState` for the life of the screen and
-interpolates its position toward each fix, so Angel walks with the user instead of
-vanishing and rematerialising once a second; a jump over ~180 m is snapped, because
-gliding across a city lies about where she was in between. Tapping her pulses the bitmap
-and shows `AngelWhereAmI` — a card in the top overlay, not a map info window, which would
-be unreadable at low zoom and off-screen whenever the camera follows her.
+interpolates toward each fix, so Angel walks with the user instead of rematerialising
+once a second; a jump over ~180 m snaps, because gliding across a city lies about where
+she was in between. Tapping her pulses the bitmap and shows `AngelWhereAmI` — a card in
+the top overlay, not a map info window, which is unreadable at low zoom and off-screen
+whenever the camera follows her.
 
 Anything pinned to the bottom of the map must clear `BottomBarClearance`, and more while
-a route sheet is up. The floating navigation draws over map content: a sheet at the bottom
-edge is half-hidden behind it, and one drawn on top of it swallows taps meant for a tab.
+a route sheet is up: the floating nav draws over map content, so a sheet at the bottom
+edge hides behind it and one on top of it swallows taps meant for a tab.
+
+### A finished recording names itself
+
+`SessionSummaryAgent` runs *after* `recorder.finish()`, on the teardown scope, and
+rewrites the session's title and summary. Separate from the live agents because it needs
+the whole session — which does not exist until recording stops — and because nothing
+waits on it, so a slow summary cannot delay an alert.
+
+`SessionNarrator` does the work: pure, deterministic, **not** a language model — an LLM
+wants a gigabyte of RAM and seconds on-device, or a round trip carrying a transcript of
+someone's worst night. Two rules: it **describes, never diagnoses** ("a sound like a slap
+or impact", never "you were assaulted"), and raw AudioSet class names never reach the
+user (`interpretSound` is that layer). Key moments are derived on read, not stored.
+
+### Walking a route happens on the map
+
+"Walk with me" used to navigate to Home — the one screen that does not show the route
+just chosen. It now enters a walking mode on the map: only the chosen polyline is drawn,
+the search bar becomes one instruction at a time, the camera follows.
+
+`WalkDirections` derives the turns from the polyline, because these routes are scored
+corridors with no step list. It gives real distances and directions and **must never
+invent a street name** — a confident wrong name at night is worse than none. Off-route is
+measured to the nearest *segment*: with sparse vertices, nearest-vertex reported someone
+walking down the middle of the corridor as 100 m adrift.
+
+### A stationary user still leaves breadcrumbs
+
+The location stream only fires after five metres of movement, so someone stopped by a
+stranger or held somewhere produced no points and the trail ended wherever she last
+walked. The service now writes one every minute regardless — that gap in the record was
+the shape of the incident.
 
 ### Stubs must never fake success
 
-A detector or model stand-in that reports a match would make hands-free look like it
-works, which for a safety app is dangerous to demo. When a model is unavailable the UI
-says so and does not offer an Arm button that arms into silence.
+A stand-in that reports a match makes hands-free look like it works, which for a safety
+app is dangerous to demo. When a model is unavailable the UI says so and does not offer
+an Arm button that arms into silence.
 
 ## The speech stack is a cascade
 
@@ -340,33 +365,24 @@ Each tier runs only when the one below says it is worth it. Rationale and benchm
 ```
 
 **Never put a language model on the hot path.** On-device LLM is 2–5 s to first token and
-~1.2 GB RAM; an MFCC+SVM distress classifier reaches ~95% / 1% FA for 3–5% battery per
-10 h. `HeuristicThreatAssessor` runs on every chunk and must stay instant and auditable —
-its severity breakdown is what the user reads back after an alert. An LLM is only for the
-ambiguous 0.30–0.60 band, over **text**, never over audio.
+~1.2 GB RAM. `HeuristicThreatAssessor` runs on every chunk and must stay instant and
+auditable — its severity breakdown is what the user reads back after an alert. An LLM is
+only for the ambiguous 0.30–0.60 band, over **text**, never over audio.
 
-Escalation requires **two or more** corroborating signals; one weak signal must never be
-able to call someone's emergency contacts. `HeuristicThreatAssessorTest` pins both failure
-modes — if you retune weights, that test is the contract.
+Escalation requires **two or more** corroborating signals; one weak signal must never
+reach someone's emergency contacts. `HeuristicThreatAssessorTest` is the contract if you
+retune weights.
 
 Cloud ASR is better and cheaper and we still do not use it on the live path: audio never
 leaving the device is the product promise, and connectivity fails where she needs it most.
 
 ### Audio package
 
-```
-audio/SpeechPipeline          the interfaces every tier implements, + the rationale
-audio/AudioFeatures           log-mel + FFT front end, cosineSimilarity
-audio/SentencePieceTokenizer  phrase → tokens, Viterbi over bpe.model
-audio/SherpaWakeWordDetector  keyword spotting (fp32 encoder — int8 aborts natively)
-audio/SherpaTranscriber       Silero VAD + Moonshine Tiny
-audio/SherpaSpeakerIdentifier CAM++ voiceprint; embedSpeech() is the comparable path
-audio/VoiceEnroller           records audio, folds a running mean, reports clarity
-audio/YamnetAudioTagger       521 AudioSet classes via LiteRT
-audio/HeuristicThreatAssessor the cheap reasoning tier
-service/GuardianAudioSession  one AudioRecord, phase-routed; route() is the test seam
-service/GuardianListeningService  the microphone FGS
-```
+`audio/` holds one class per tier — `SpeechPipeline` (the interfaces and the rationale),
+`AudioFeatures`, `SentencePieceTokenizer`, `SherpaWakeWordDetector`, `SherpaTranscriber`,
+`SherpaSpeakerIdentifier`, `YamnetAudioTagger`, `HeuristicThreatAssessor` — and
+`service/GuardianAudioSession` owns the single `AudioRecord`, phase-routed, with
+`route()` as the test seam.
 
 The KWS encoder **must be fp32**. Both int8 conversions abort natively mid-stream
 (`Reshape` input/requested shape mismatch in `KeywordSpotter_decode`).
@@ -384,14 +400,13 @@ ui/…                     theme, mascot, components, icons, navigation, feature
 ```
 
 Screens read one snapshot and never touch a data source. To surface something new, add it
-to the domain model and push it through the repository — do not reach around it. Sample
-data lives in `*Samples`, never inline in a preview, so previews and the running app
-cannot drift.
+to the domain model and push it through the repository. Sample data lives in `*Samples`,
+never inline in a preview, so previews and the running app cannot drift.
 
 Secrets are modelled by **status, not value**: `VoiceProfile` carries a clarity score, not
-the voiceprint; `DisarmPin` carries whether a PIN is set, not the PIN. Keep it that way.
+the voiceprint; `DisarmPin` carries whether a PIN is set, not the PIN.
 
-Room is at **version 2** with exported schemas and real migrations in
+Room is at **version 4** with exported schemas and real migrations in
 `GuardianDatabase.MIGRATIONS`. No destructive migration — losing a user's guardians and
 codewords is a safety regression, not an inconvenience. Transcripts, the voiceprint and
 the disarm PIN are **never uploaded**; `CloudSync` uses hand-written maps so a new column
@@ -443,41 +458,30 @@ add it to the theme.
 
 ### Paired colours
 
-Accent tokens invert between light and dark; always use the paired content colour.
-
-| Background | Content |
-|---|---|
-| `colors.accentSoft` | `colors.onAccentSoft` |
-| `colors.accentWarm` | `colors.onAccentWarm` |
-| `colors.activeContainer` | `colors.onActiveContainer` |
-| `colors.safeContainer` | `colors.onSafeContainer` |
-| `materialColors.primaryContainer` | `materialColors.onPrimaryContainer` |
-
-Borrowing an unrelated `on*` role is the most likely bug here: it looks fine in light mode
-and renders at ~1.3:1 in dark. `ColorContrastTest` catches it — run the unit tests after
-any colour change.
+Accent tokens invert between light and dark; always use the paired content colour —
+`accentSoft`/`onAccentSoft`, `accentWarm`/`onAccentWarm`, `activeContainer`/
+`onActiveContainer`, `safeContainer`/`onSafeContainer`, and Material's own pairs.
+Borrowing an unrelated `on*` role looks fine in light mode and renders at ~1.3:1 in dark.
+`ColorContrastTest` catches it — run the unit tests after any colour change.
 
 ### Accessibility floors
 
-4.5:1 for text, 3:1 for any non-text element that carries meaning or identifies a control.
-Three values from the original design document fail these and have accessible siblings
-already: use `colors.focusRing` (not raw rose) for focus, `colors.borderControl` (not
-`borderDefault`/`borderEmphasis`) for control outlines, and `colors.iconMuted` (not
-espresso at 45%) for inactive nav icons. `borderDefault`/`borderEmphasis` are decorative
-dividers only.
+4.5:1 for text, 3:1 for any non-text element that carries meaning. Three values from the
+original design document fail and have accessible siblings: `colors.focusRing` for focus,
+`colors.borderControl` for control outlines, `colors.iconMuted` for inactive nav icons.
+`borderDefault`/`borderEmphasis` are decorative dividers only.
 
 Colour is never the only signal — pair every status with a label and a distinct glyph.
 
 ### Other conventions
 
-- Icons: `GuardianIcons`, stroke-based 24×24 with round caps. Add there rather than
-  pulling in Material's filled glyphs.
-- Shapes: `shapes.pill` for buttons and chips, `.lg` (16 dp) cards, `.xl` (24 dp) sheets
-  and hero cards, `.md` (12 dp) inputs.
-- Standard buttons are 52 dp; in-card pill actions are 44 dp.
-- Elevation is ambient warm glow plus tonal layering via `guardianCardElevation`,
-  `guardianFloatingElevation`, `focalHalo`, `ambientGlow` — **not** Material tonal
-  elevation, which would double-tint the surface.
+- Icons: `GuardianIcons`, stroke-based 24×24, round caps. Add there rather than pulling
+  in Material's filled glyphs.
+- Shapes: `pill` for buttons and chips, `.lg` (16 dp) cards, `.xl` (24 dp) sheets and
+  heroes, `.md` (12 dp) inputs. Buttons 52 dp; in-card pill actions 44 dp.
+- Elevation is ambient glow plus tonal layering (`guardianCardElevation`,
+  `guardianFloatingElevation`, `focalHalo`, `ambientGlow`) — **not** Material tonal
+  elevation, which double-tints the surface.
 - No dynamic colour. The palette is a safety signal; wallpaper must not repaint it.
 - Inside a vertically scrolling column, build grids from chunked `Row`s. A
   `LazyVerticalGrid` nested in a same-orientation scroll will crash.
@@ -486,99 +490,88 @@ Colour is never the only signal — pair every status with a label and a distinc
 ## Angel (the mascot)
 
 `ui/mascot/` — a Compose-canvas mascot with five tiers: `Resting`, `Sanctuary`,
-`Cautious`, `Warning`, `Critical`. Adding a sixth means updating `AngelStyles.kt`, which
-declares all five side by side.
+`Cautious`, `Warning`, `Critical`, declared side by side in `AngelStyles.kt`.
 
 Derive mood only through `AngelMood.fromScore(score, atSafeHaven, isArmed, inDuress)` —
-picking a mood by hand in a screen makes two surfaces disagree about how worried Angel is.
-She is decorative by default; pass `contentDescription` only where she is the sole carrier
-of a message, which should be nowhere.
+picking one by hand makes two surfaces disagree about how worried Angel is. She is
+decorative; pass `contentDescription` only where she is the sole carrier of a message,
+which should be nowhere.
 
 ## Home screen
 
-The safety score sits directly under Angel, above everything optional. It used to live
-inside the sanctuary/journey bodies, below the setup and hands-free cards, which put it
-entirely below the fold on a not-yet-configured account — the one number the user opens
-the app to see required scrolling past three cards about what she had not set up.
+The safety score sits directly under Angel, above everything optional — it used to sit
+below the setup cards, putting the one number she opens the app to see below the fold.
 
-The app bar's left action is **record/stop**, not a quick alert. A duress shortcut there
-put "call my emergency contacts" one stray tap from the top of the screen with no hold
-and no undo; recording is the reversible action and the one wanted often. The duress
-trigger stays a three-second hold further down.
+The app bar's left action is **record/stop**, not a quick alert: that put "call my
+emergency contacts" one stray tap from the top of the screen with no hold and no undo.
 
-
-One `GuardianMode` drives all three states: `Standby` (mic dormant, quiet surface) ·
-`Listening` (armed, warm gradient hero plus telemetry) · `Recording` (panel expands at
-top with timer, waveform, transcript, who was alerted, and a full-width Stop button).
+One `GuardianMode` drives all three states: `Standby` (mic dormant) · `Listening` (armed,
+warm hero plus telemetry) · `Recording` (timer, waveform, transcript, who was alerted,
+full-width Stop).
 
 The duress trigger is a **3-second hold**; stopping is an immediate tap. Do not make these
 symmetrical — arming is deliberate, standing down is not.
 
-A manual record path must always exist and must depend on **nothing but `RECORD_AUDIO`**:
-no wake word, no keyword model, no notification permission.
-`GuardianListeningService.record()` arms and records in one step, and it is the thing that
-still works when everything clever has failed. It is offered both at home and mid-walk.
+A manual record path must always exist and depend on **nothing but `RECORD_AUDIO`** — no
+wake word, no keyword model, no notification permission.
+`GuardianListeningService.record()` arms and records in one step, and is what still works
+when everything clever has failed. Offered both at home and mid-walk.
 
 ## Safety score
 
-A probability estimate from public crime data, time of day, distance from safe base, safe
-nodes and lighting. Lead with the band and a one-line rationale; the percentage is
-secondary and every factor is listed. Never present it as a guarantee.
-
-Demographic factors (race, age) are **opt-in and off by default**. Do not add them to the
-defaults and do not infer them.
+A probability estimate from public crime data, time of day, distance from safe base,
+safe nodes and lighting. Lead with the band and a one-line rationale; the percentage is
+secondary and every factor is listed. **Never present it as a guarantee.** Demographic
+factors (race, age) are opt-in, off by default, and never inferred.
 
 ## Testing notes
 
-- `GuardianAudioSession.route()` and `armForTest()` exist so the phase machine can be
-  driven with recorded audio instead of a microphone. The fixture is
-  `app/src/androidTest/assets/speech_light_up.wav` (sherpa's own clip, contains "LIGHT
-  UP"). Registering that as the wake phrase means a detection can only come from the model
+- `GuardianAudioSession.route()` and `armForTest()` drive the phase machine with recorded
+  audio instead of a microphone. The fixture is
+  `app/src/androidTest/assets/speech_light_up.wav` (sherpa's clip, contains "LIGHT UP");
+  registering that as the wake phrase means a detection can only come from the model
   genuinely matching audio.
-- Prefer an instrumented test against a real repository over UI automation. Driving the UI
-  was tried and mostly tested the emulator's keyboard.
-- For UI automation use the **emulator** (`Pixel_8a_API_35`), not the physical Pixel 7a —
-  it has a secure lock screen and taps silently go to the lockscreen. Set
-  `adb shell svc power stayon true`, confirm foreground with
-  `dumpsys activity activities | grep topResumedActivity`, and remember the IME covers the
-  bottom ~40% of the screen, so dismiss it before tapping a bottom bar. Avoid
-  `KEYCODE_MENU` / `KEYCODE_ESCAPE` on the emulator: they launch the Google voice
-  assistant, which steals focus.
-- `uiautomator dump` does work despite Angel's infinite animations; Espresso idling-resource
-  waits are the thing that will time out.
+- Prefer an instrumented test against a real repository over UI automation, which when
+  tried mostly tested the emulator's keyboard.
+- The **emulator can no longer hold the app** — the APK is 269 MB and installing needs
+  ~900 MB free on `/data`; each failed attempt also strands a ~250 MB staged session
+  (`pm install-abandon`). On-device checks run on Ida's unlocked Pixel: `adb shell input`
+  works there, but it is her phone, so aim every tap. Confirm foreground with
+  `dumpsys activity activities | grep topResumedActivity`, and dismiss the IME before
+  tapping a bottom bar — it covers the bottom ~40%.
+- `uiautomator dump` works despite Angel's infinite animations; Espresso idling-resource
+  waits are what time out.
 
 ## Current state and what is next
 
-Done: the UI, navigation and auth gate; the Angel mascot; Room (v4, exported schemas,
-Keystore-encrypted secrets, real migrations); accounts ready for Firebase; opt-in cloud
-backup that cannot upload transcripts; the speech cascade wired and **proven on device**
-(detection, no false accept, the speaker gate both ways, enrolment, re-arming, manual
-recording, persistence); real session recording with transcripts, breadcrumb trails,
-derived incidents, analytics, export and deletion; the Berkeley safest-route map with live
-Maps Compose, fused GPS, themed pins, Places search, home/safe-place persistence with
-geofence hysteresis and Sanctuary semantics, and route scoring over BPD/UCPD cells and
-NWS weather; guardian alerting by SMS with an emergency call to the first guardian. See
+Done: UI, navigation and auth gate; the mascot; Room v4 with real migrations and
+Keystore-encrypted secrets; accounts ready for Firebase; the speech cascade **proven on
+device**; session recording with transcripts, trails, derived incidents, analytics,
+export, deletion and an after-the-fact summary; the Berkeley safest-route map with live
+Maps Compose, fused GPS, themed pins, Places search, safe places, derived walking
+directions, and scoring over BPD/UCPD cells and NWS weather; guardian alerting by SMS
+with delivery receipts, a WhatsApp fallback, and a call to the first guardian. See
 `docs/BERKELEY_*.md`.
 
 Next, roughly in order:
 
 1. **Tune detection thresholds against real speech.** Only Ida can do this — nothing
-   automated can tell you how the wake word behaves with her voice, through a pocket, with
-   a television on. She has not yet said it aloud to an armed build.
+   automated can say how the wake word behaves with her voice, through a pocket, with a
+   television on. She has not yet said it aloud to an armed build.
 2. **Tier 3 reasoning** — an LLM assessor over text for the ambiguous 0.30–0.60 band.
 3. **Room-back `GuardianRepository` and `RouteRepository`.** `ActivityRepository` is done;
    Home still reads `FakeGuardianRepository`, so its mascot and score bypass
    `GuardianSafetyStateResolver` that Map already uses.
-4. **Navigation polish** — path selection does not jump to Home, no animation to the
-   selected path, no Angel chat-bubble directions, no persistent navigation when the app
+4. **Navigation polish** — no animation to the selected path, no Angel chat-bubble
+   directions, no persistent navigation when the app
    is backgrounded.
-5. **APK size** — 269 MB with models bundled. Needs first-run download or Play Asset
-   Delivery before any release. It no longer fits on a near-full emulator.
-6. **Localise** the inline Angel copy into `strings.xml`.
+5. **APK size** — 269 MB with models bundled; needs first-run download or Play Asset
+   Delivery before release. It no longer fits on a near-full emulator.
+6. **Localise** the inline copy into `strings.xml`.
 
-Firebase code is complete but **no Firebase project exists yet** — Ida has to create it
-and drop in `google-services.json`. The app is designed to work fully without it
-(`FirebaseAvailability.isConfigured` gates the paths), so do not make it a hard dependency.
+Firebase code is complete but **no Firebase project exists yet** — Ida must create it and
+drop in `google-services.json`. The app works fully without it
+(`FirebaseAvailability.isConfigured` gates every path); never make it a hard dependency.
 
 ## House rules
 
@@ -587,7 +580,7 @@ and drop in `google-services.json`. The app is designed to work fully without it
 - Never weaken a test to make it pass. The instrumented audio tests exist because they
   caught bugs everything else missed.
 - Do not commit or push unless asked. Models live in `app/src/main/assets/`; extract
-  archives and delete `test_wavs/` before committing any new model. ABI filters are
-  `arm64-v8a` + `x86_64` — do not re-add `armeabi-v7a`/`x86` (57 MB for nobody).
+  archives and delete `test_wavs/` before committing one. ABI filters are `arm64-v8a` +
+  `x86_64` — do not re-add `armeabi-v7a`/`x86` (57 MB for nobody).
 - Report honestly. If a test fails, say so with the output; if something is unverified,
   say which part and why.

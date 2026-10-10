@@ -89,6 +89,7 @@ import com.example.guardianangel.ui.map.components.AngelStatusBubble
 import com.example.guardianangel.ui.map.components.HomeConfigDialog
 import com.example.guardianangel.ui.map.components.MapLegendAndFiltersDialog
 import com.example.guardianangel.ui.map.components.MarkerDetailSheet
+import com.example.guardianangel.ui.map.components.WalkingDirectionsCard
 import com.example.guardianangel.ui.map.components.MarkerFilterState
 import com.example.guardianangel.ui.map.components.SelectedMapFeature
 import com.example.guardianangel.ui.mascot.AngelMood
@@ -327,6 +328,12 @@ fun MapScreen(
     var angelCallout by remember { mutableStateOf<AngelWhereAmI.Callout?>(null) }
     var angelPulse by remember { mutableStateOf(0) }
 
+    // The route being walked, once she taps "Walk with me". Null the rest of the time.
+    // Holding the id rather than the route itself means a recalculated path with the
+    // same id keeps the walk going instead of silently ending it.
+    var walkingRouteId by remember { mutableStateOf<String?>(null) }
+    val walkingRoute = plan.routes.firstOrNull { it.id == walkingRouteId }
+
     val scope = rememberCoroutineScope()
 
     // Default map center: user position or downtown Berkeley
@@ -498,8 +505,10 @@ fun MapScreen(
                 )
             }
 
-            // Route Polylines
-            plan.routes.forEach { r ->
+            // Route Polylines. Once a walk starts, only the chosen one: the point of
+            // following a route is not having to work out which of three lines is yours.
+            val drawnRoutes = if (walkingRoute != null) listOf(walkingRoute) else plan.routes
+            drawnRoutes.forEach { r ->
                 if (r.path.isNotEmpty()) {
                     val pts = r.path.map { LatLng(it.latitude, it.longitude) }
                     Polyline(
@@ -525,8 +534,22 @@ fun MapScreen(
                 LocationPermissionBanner(onRequestLocation = onRequestLocation)
             }
 
+            // Turn-by-turn, in place of the search bar. Walking is a mode, not another
+            // overlay on top of planning: a search field during a walk is one more thing
+            // between her and the next turn.
+            if (walkingRoute != null) {
+                WalkingDirectionsCard(
+                    route = walkingRoute,
+                    currentLocation = currentLocation,
+                    onEndWalk = {
+                        walkingRouteId = null
+                        onClearDestination()
+                    },
+                )
+            }
+
             // Destination Search Bar
-            if (!planning) {
+            if (!planning && walkingRoute == null) {
                 InteractiveSearchBar(
                     query = searchQuery,
                     onQueryChange = { searchQuery = it },
@@ -675,7 +698,10 @@ fun MapScreen(
             elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = if (planning) 240.dp else 100.dp, end = 16.dp)
+                .padding(
+                    bottom = if (planning && walkingRoute == null) 240.dp else 100.dp,
+                    end = 16.dp,
+                )
                 .size(48.dp)
                 .semantics {
                     contentDescription = if (followMode) "Camera following user" else "Recenter camera on user"
@@ -690,7 +716,7 @@ fun MapScreen(
 
         // --- 4. Route Sheet (Multiple Walking Alternatives) -----------------------
         AnimatedVisibility(
-            visible = planning,
+            visible = planning && walkingRoute == null,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier.align(Alignment.BottomCenter),
@@ -699,7 +725,14 @@ fun MapScreen(
                 routes = plan.routes,
                 selectedPreference = plan.preference,
                 onSelectPreference = onPreferenceChange,
-                onWalk = onWalk,
+                onWalk = {
+                    // Enters walking mode here rather than navigating away. Tapping
+                    // "Walk with me" used to drop her on the home screen, which is the
+                    // one place the route she just chose is not visible.
+                    walkingRouteId = plan.recommended?.id
+                    followMode = true
+                    onWalk()
+                },
             )
         }
 
@@ -710,7 +743,11 @@ fun MapScreen(
         MarkerDetailSheet(
             feature = selectedFeature,
             onDismiss = { selectedFeature = null },
-            bottomInset = if (planning) PLANNING_SHEET_CLEARANCE else BottomBarClearance,
+            bottomInset = if (planning && walkingRoute == null) {
+                PLANNING_SHEET_CLEARANCE
+            } else {
+                BottomBarClearance
+            },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
 
