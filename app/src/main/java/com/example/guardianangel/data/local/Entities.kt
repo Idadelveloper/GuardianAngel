@@ -210,6 +210,50 @@ data class WakeWordEntity(
     val syncedAt: Long? = null,
 )
 
+/**
+ * A journey, from "walk with me" to arrival.
+ *
+ * Stored rather than held in memory because navigation has to survive the screen, the
+ * process, and the user putting her phone in her pocket — and because the log of where
+ * she went and whether she got there is worth keeping on its own.
+ */
+@Entity(
+    tableName = "trips",
+    foreignKeys = [
+        ForeignKey(
+            entity = UserEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["userId"],
+            onDelete = ForeignKey.CASCADE,
+        )
+    ],
+    indices = [Index("userId"), Index("outcome")],
+)
+data class TripEntity(
+    @PrimaryKey val id: String,
+    val userId: String,
+    val destinationName: String,
+    val destinationAddress: String,
+    val destinationLat: Double,
+    val destinationLng: Double,
+    val originLat: Double?,
+    val originLng: Double?,
+    val routeId: String?,
+    val routeLabel: String?,
+    val startedAt: Long,
+    val endedAt: Long? = null,
+    /** `TripOutcome.name`. Exactly one row per user may be `InProgress`. */
+    val outcome: String,
+    val distanceMeters: Int? = null,
+    val notifyContactId: String? = null,
+    val notifyContactName: String? = null,
+    val notifyMessage: String? = null,
+    val arrivalNotifiedAt: Long? = null,
+    val arrivalNotifyError: String? = null,
+    val updatedAt: Long = 0,
+    val syncedAt: Long? = null,
+)
+
 /** An action codeword, said while already recording. */
 @Entity(
     tableName = "codewords",

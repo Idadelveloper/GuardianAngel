@@ -40,6 +40,17 @@ interface AppContainer {
     val codewordRepository: CodewordRepository
     val activityRepository: ActivityRepository
     val routeRepository: RouteRepository
+
+    /** Journeys, and whether she got there. Survives the screen and the process. */
+    val tripRepository: com.example.guardianangel.domain.repository.TripRepository
+
+    /**
+     * The channel an alert or an arrival text leaves by.
+     *
+     * Exposed because the navigation service needs it too, and a second instance would
+     * mean two different answers to `canSendSilently`.
+     */
+    val guardianNotifier: com.example.guardianangel.domain.alert.GuardianNotifier
     val listeningRepository: ListeningRepository
     val authRepository: AuthRepository
 
@@ -120,6 +131,10 @@ class InMemoryAppContainer(
     override val codewordRepository: CodewordRepository = FakeCodewordRepository()
     override val activityRepository: ActivityRepository = FakeActivityRepository()
     override val routeRepository: RouteRepository = FakeRouteRepository()
+    override val tripRepository: com.example.guardianangel.domain.repository.TripRepository =
+        com.example.guardianangel.data.InMemoryTripRepository()
+    override val guardianNotifier: com.example.guardianangel.domain.alert.GuardianNotifier =
+        com.example.guardianangel.data.PreviewGuardianNotifier()
     override val listeningRepository: ListeningRepository =
         FakeListeningRepository(startEnrolled = startSignedIn)
     override val authRepository: AuthRepository =

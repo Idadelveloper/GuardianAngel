@@ -46,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -74,7 +75,10 @@ import com.example.guardianangel.domain.model.RoutePlan
 import com.example.guardianangel.domain.model.RoutePreference
 import com.example.guardianangel.domain.model.SafeHavenPoi
 import com.example.guardianangel.domain.model.SafeLocation
+import com.example.guardianangel.domain.model.EmergencyContact
 import com.example.guardianangel.domain.model.SafeRoute
+import com.example.guardianangel.domain.model.TripOutcome
+import com.example.guardianangel.service.GuardianNavigationService
 import com.example.guardianangel.domain.model.UserLocationSnapshot
 import com.example.guardianangel.domain.repository.GuardianRepository
 import com.example.guardianangel.domain.repository.PermissionProbe
@@ -88,6 +92,7 @@ import com.example.guardianangel.ui.map.components.AngelLocationCallout
 import com.example.guardianangel.ui.map.components.AngelStatusBubble
 import com.example.guardianangel.ui.map.components.HomeConfigDialog
 import com.example.guardianangel.ui.map.components.MapLegendAndFiltersDialog
+import com.example.guardianangel.ui.map.components.ArrivalNotifyDialog
 import com.example.guardianangel.ui.map.components.MarkerDetailSheet
 import com.example.guardianangel.ui.map.components.WalkingDirectionsCard
 import com.example.guardianangel.ui.map.components.MarkerFilterState
@@ -123,6 +128,8 @@ import kotlinx.coroutines.launch
 fun MapRoute(
     routeRepository: RouteRepository,
     guardianRepository: GuardianRepository,
+    tripRepository: com.example.guardianangel.domain.repository.TripRepository,
+    contactsRepository: com.example.guardianangel.domain.repository.ContactsRepository,
     crimeDataService: com.example.guardianangel.data.crime.CrimeDataService? = null,
     locationTracker: LocationTracker? = null,
     permissionProbe: PermissionProbe? = null,
@@ -134,6 +141,7 @@ fun MapRoute(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val plan by routeRepository.observeRoutePlan()
         .collectAsStateWithLifecycle(initialValue = emptyPlan())
     val quickDestinations by routeRepository.observeQuickDestinations()
@@ -142,6 +150,29 @@ fun MapRoute(
         .collectAsStateWithLifecycle(initialValue = null)
     val safeLocations by (safeLocationRepository?.observeLocations() ?: flowOf(emptyList()))
         .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // The walk in progress, read from storage rather than held in this composable. Local
+    // state meant switching tabs silently ended the navigation she was relying on.
+    val activeTrip by tripRepository.observeActiveTrip()
+        .collectAsStateWithLifecycle(initialValue = null)
+    val guardians by contactsRepository.observeContacts()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // Coming back to the map after the route plan was cleared: rebuild the destination
+    // from the trip so the same line is drawn again. Without this the walk is still
+    // running in the service but the map shows nothing to follow.
+    LaunchedEffect(activeTrip?.id, plan.destination?.id) {
+        val trip = activeTrip ?: return@LaunchedEffect
+        if (plan.destination?.point == trip.destination) return@LaunchedEffect
+        routeRepository.selectCustomDestination(
+            Destination(
+                id = trip.routeId ?: trip.id,
+                name = trip.destinationName,
+                address = trip.destinationAddress,
+                point = trip.destination,
+            )
+        )
+    }
 
     var hasLocationPermission by remember {
         mutableStateOf(locationTracker?.hasLocationPermission() ?: false)
@@ -267,10 +298,34 @@ fun MapRoute(
                 }
             }
         },
-        onWalk = {
+        activeTrip = activeTrip,
+        guardians = guardians,
+        onWalk = { route, notifyContactId, notifyMessage ->
             scope.launch {
+                val destination = plan.destination ?: return@launch
+                tripRepository.start(
+                    destination = destination,
+                    origin = currentLocation,
+                    routeId = route?.id,
+                    routeLabel = route?.label,
+                    notifyContactId = notifyContactId,
+                    notifyContactName = guardians.firstOrNull { it.id == notifyContactId }?.name,
+                    notifyMessage = notifyMessage,
+                )
+                // Started only after the trip row exists: the service reads it on
+                // startup, and a race there would stand the walk down immediately.
+                GuardianNavigationService.start(context)
                 guardianRepository.armGuardian()
                 onJourneyStarted()
+            }
+        },
+        onEndWalk = {
+            scope.launch {
+                activeTrip?.let {
+                    tripRepository.complete(it.id, TripOutcome.Ended, distanceMeters = null)
+                }
+                GuardianNavigationService.end(context)
+                routeRepository.clearDestination()
             }
         },
         modifier = modifier,
@@ -307,7 +362,10 @@ fun MapScreen(
     onSaveHome: (String, GeoPoint, String, Float) -> Unit,
     onRemoveHome: () -> Unit,
     onNavigateHome: () -> Unit,
-    onWalk: () -> Unit,
+    onWalk: (route: SafeRoute?, notifyContactId: String?, notifyMessage: String?) -> Unit,
+    onEndWalk: () -> Unit,
+    activeTrip: com.example.guardianangel.domain.model.Trip? = null,
+    guardians: List<EmergencyContact> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     val planning = plan.destination != null
@@ -328,11 +386,14 @@ fun MapScreen(
     var angelCallout by remember { mutableStateOf<AngelWhereAmI.Callout?>(null) }
     var angelPulse by remember { mutableStateOf(0) }
 
-    // The route being walked, once she taps "Walk with me". Null the rest of the time.
-    // Holding the id rather than the route itself means a recalculated path with the
-    // same id keeps the walk going instead of silently ending it.
-    var walkingRouteId by remember { mutableStateOf<String?>(null) }
-    val walkingRoute = plan.routes.firstOrNull { it.id == walkingRouteId }
+    // Derived from the stored trip, not from local state, so leaving the screen and
+    // coming back resumes the same walk. Falls back to the recommended route when the
+    // plan has been recalculated and the original id is gone — the walk is to a
+    // destination, and losing the exact corridor must not end it.
+    val walkingRoute = activeTrip?.let { trip ->
+        plan.routes.firstOrNull { it.id == trip.routeId } ?: plan.recommended
+    }
+    var showArrivalPrompt by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -541,10 +602,8 @@ fun MapScreen(
                 WalkingDirectionsCard(
                     route = walkingRoute,
                     currentLocation = currentLocation,
-                    onEndWalk = {
-                        walkingRouteId = null
-                        onClearDestination()
-                    },
+                    onEndWalk = onEndWalk,
+                    arrivalContactName = activeTrip?.notifyContactName,
                 )
             }
 
@@ -726,12 +785,11 @@ fun MapScreen(
                 selectedPreference = plan.preference,
                 onSelectPreference = onPreferenceChange,
                 onWalk = {
-                    // Enters walking mode here rather than navigating away. Tapping
-                    // "Walk with me" used to drop her on the home screen, which is the
-                    // one place the route she just chose is not visible.
-                    walkingRouteId = plan.recommended?.id
-                    followMode = true
-                    onWalk()
+                    // Asks about telling someone first. The question only makes sense
+                    // at this moment — she has picked where she is going and has not
+                    // set off — and burying it in settings would mean nobody ever uses
+                    // it.
+                    showArrivalPrompt = true
                 },
             )
         }
@@ -750,6 +808,20 @@ fun MapScreen(
             },
             modifier = Modifier.align(Alignment.BottomCenter),
         )
+
+        if (showArrivalPrompt) {
+            ArrivalNotifyDialog(
+                destinationName = plan.destination?.name.orEmpty(),
+                guardians = guardians,
+                onDismiss = { showArrivalPrompt = false },
+                onStart = { contactId, message ->
+                    showArrivalPrompt = false
+                    followMode = true
+                    onWalk(plan.recommended, contactId, message)
+                },
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
 
         // --- 6. Home Configuration Dialog ------------------------------------------
         if (showHomeDialog) {

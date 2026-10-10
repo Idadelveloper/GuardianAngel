@@ -210,8 +210,17 @@ class DatabaseAppContainer(
      * Two instances would mean an alert from the button and one from a codeword could
      * both fire for the same incident.
      */
-    val notificationAgent = com.example.guardianangel.agent.GuardianNotificationAgent(
+    override val tripRepository: com.example.guardianangel.domain.repository.TripRepository =
+        com.example.guardianangel.data.local.RoomTripRepository(
+            dao = database.tripDao(),
+            currentUser = currentUser,
+        )
+
+    override val guardianNotifier: com.example.guardianangel.domain.alert.GuardianNotifier =
         com.example.guardianangel.data.platform.SmsGuardianNotifier(context)
+
+    val notificationAgent = com.example.guardianangel.agent.GuardianNotificationAgent(
+        guardianNotifier
     )
 
     override val alertDispatcher = com.example.guardianangel.domain.alert.AlertDispatcher(

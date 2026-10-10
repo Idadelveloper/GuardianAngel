@@ -42,7 +42,7 @@ import com.example.guardianangel.ui.theme.GuardianAngelTheme
 import com.example.guardianangel.ui.theme.GuardianTheme
 
 /** The two things the Activities tab can show. */
-private enum class ActivityView { Log, Insights }
+private enum class ActivityView { Log, Journeys, Insights }
 
 /**
  * Tab 3 — Activities.
@@ -55,6 +55,7 @@ private enum class ActivityView { Log, Insights }
 @Composable
 fun ActivitiesRoute(
     repository: ActivityRepository,
+    tripRepository: com.example.guardianangel.domain.repository.TripRepository,
     onOpenSession: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -68,8 +69,11 @@ fun ActivitiesRoute(
     // One query for every row's path, rather than one per row.
     val trails by repository.observeTrailPaths()
         .collectAsStateWithLifecycle(initialValue = emptyMap())
+    val trips by tripRepository.observeRecentTrips()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
 
     ActivitiesScreen(
+        trips = trips,
         sessions = sessions,
         analytics = analytics,
         trails = trails,
@@ -85,6 +89,7 @@ fun ActivitiesRoute(
 @Composable
 fun ActivitiesScreen(
     sessions: List<MonitoredSession>,
+    trips: List<com.example.guardianangel.domain.model.Trip> = emptyList(),
     analytics: MovementAnalytics,
     trails: Map<String, List<TrailPoint>>,
     filter: ActivityFilter,
@@ -116,7 +121,7 @@ fun ActivitiesScreen(
                 )
                 Spacer(Modifier.height(GuardianTheme.spacing.sm))
                 SegmentedToggle(
-                    options = listOf("Log", "Insights"),
+                    options = listOf("Log", "Journeys", "Insights"),
                     selectedIndex = view.ordinal,
                     onSelect = { view = ActivityView.entries[it] },
                 )
@@ -137,6 +142,7 @@ fun ActivitiesScreen(
                         onFilterChange = onFilterChange,
                         onOpenSession = onOpenSession,
                     )
+                    ActivityView.Journeys -> JourneysView(trips = trips)
                     ActivityView.Insights -> InsightsView(
                         analytics = analytics,
                         range = range,

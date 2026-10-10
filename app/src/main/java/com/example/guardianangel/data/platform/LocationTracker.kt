@@ -130,6 +130,54 @@ class LocationTracker(
         }
     }
 
+    /**
+     * Location for an active walk: every few seconds, moving or not.
+     *
+     * [observeLocation] carries a five-metre displacement filter, which is right for
+     * breadcrumbs and wrong here. Arrival is "close enough *and* still there", and the
+     * moment someone stops walking a displacement-filtered stream stops emitting — so
+     * the dwell that proves she arrived could never complete for anyone who actually
+     * arrived. Interval-only, with the accuracy attached so a vague fix can be refused.
+     */
+    @SuppressLint("MissingPermission")
+    fun observeNavigationLocation(): Flow<com.example.guardianangel.domain.model.UserLocationSnapshot> =
+        callbackFlow {
+            if (!hasLocationPermission()) {
+                close()
+                return@callbackFlow
+            }
+
+            val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4_000L)
+                .setMinUpdateIntervalMillis(2_000L)
+                // No distance filter, deliberately. See above.
+                .build()
+
+            val callback = object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    val loc = result.lastLocation ?: return
+                    val point = GeoPoint(loc.latitude, loc.longitude)
+                    recordBreadcrumb(point, loc.accuracy)
+                    trySend(
+                        com.example.guardianangel.domain.model.UserLocationSnapshot(
+                            point = point,
+                            accuracyMeters = if (loc.hasAccuracy()) loc.accuracy else null,
+                            speedMps = if (loc.hasSpeed()) loc.speed else null,
+                            timestampMillis = if (loc.time > 0) loc.time else System.currentTimeMillis(),
+                        )
+                    )
+                }
+            }
+
+            try {
+                fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed requesting navigation location updates", e)
+                close(e)
+            }
+
+            awaitClose { fusedClient.removeLocationUpdates(callback) }
+        }
+
     @SuppressLint("MissingPermission")
     fun observeUserLocation(): Flow<com.example.guardianangel.domain.model.UserLocationSnapshot> = callbackFlow {
         if (!hasLocationPermission()) {

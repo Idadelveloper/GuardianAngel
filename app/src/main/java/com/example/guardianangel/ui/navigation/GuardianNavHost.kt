@@ -244,6 +244,8 @@ private fun NavGraphBuilder.mainGraph(
         composable(Routes.MAP, enterTransition = { fadeThrough() }, exitTransition = { fadeAway() }) {
             MapRoute(
                 routeRepository = container.routeRepository,
+                tripRepository = container.tripRepository,
+                contactsRepository = container.contactsRepository,
                 guardianRepository = container.guardianRepository,
                 crimeDataService = container.crimeDataService,
                 locationTracker = container.locationTracker,
@@ -260,6 +262,7 @@ private fun NavGraphBuilder.mainGraph(
         composable(Routes.ACTIVITIES, enterTransition = { fadeThrough() }, exitTransition = { fadeAway() }) {
             ActivitiesRoute(
                 repository = container.activityRepository,
+                tripRepository = container.tripRepository,
                 onOpenSession = { navController.navigate(Routes.sessionDetail(it)) },
             )
         }

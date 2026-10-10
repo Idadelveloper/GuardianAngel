@@ -189,6 +189,38 @@ interface GuardianDao {
 }
 
 @Dao
+interface TripDao {
+    /**
+     * The journey in progress, if any.
+     *
+     * `LIMIT 1` with a newest-first order rather than a uniqueness constraint: a crash
+     * between starting one trip and closing another should leave the app navigating the
+     * most recent one, not refusing to start anything.
+     */
+    @Query("SELECT * FROM trips WHERE userId = :userId AND outcome = 'InProgress' ORDER BY startedAt DESC LIMIT 1")
+    fun observeActive(userId: String): Flow<TripEntity?>
+
+    @Query("SELECT * FROM trips WHERE userId = :userId AND outcome = 'InProgress' ORDER BY startedAt DESC LIMIT 1")
+    suspend fun findActive(userId: String): TripEntity?
+
+    @Query("SELECT * FROM trips WHERE userId = :userId ORDER BY startedAt DESC LIMIT :limit")
+    fun observeRecent(userId: String, limit: Int): Flow<List<TripEntity>>
+
+    @Query("SELECT * FROM trips WHERE id = :id")
+    suspend fun find(id: String): TripEntity?
+
+    @Upsert
+    suspend fun upsert(trip: TripEntity)
+
+    /** Closes any stale in-progress rows. See `TripRepository.start`. */
+    @Query("UPDATE trips SET outcome = :outcome, endedAt = :endedAt, updatedAt = :endedAt WHERE userId = :userId AND outcome = 'InProgress'")
+    suspend fun closeAllActive(userId: String, outcome: String, endedAt: Long)
+
+    @Query("DELETE FROM trips WHERE id = :id")
+    suspend fun deleteById(id: String)
+}
+
+@Dao
 interface SessionDao {
     @Query("SELECT * FROM sessions WHERE userId = :userId ORDER BY startedAt DESC")
     fun observeAll(userId: String): Flow<List<SessionEntity>>

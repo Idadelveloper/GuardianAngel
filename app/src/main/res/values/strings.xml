@@ -142,4 +142,8 @@
     <string name="call_guardian_title">Calling %1$s</string>
     <string name="call_guardian_body">Tap to connect. Your guardians have already been texted your location.</string>
     <string name="call_guardian_action">Call %1$s</string>
+
+    <!-- Walking with Angel -->
+    <string name="navigation_channel_name">Walking with you</string>
+    <string name="navigation_channel_description">Shown while Angel is following your route, so you always know she is tracking your location.</string>
 </resources>

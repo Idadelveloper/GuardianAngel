@@ -22,6 +22,11 @@
 
     <!-- Location accompanies an alert so guardians know where to go. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!--
+      Keeps the location stream alive while she is walking with the app in her pocket.
+      Without it navigation stops the moment the screen goes off, silently.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!--
       Sends the guardian alert.
@@ -111,6 +116,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!--
+          Navigation. Separate from the listening service because it needs no microphone
+          and no models, so a walk survives standing the microphone down and a recording
+          survives arriving. Android permits both foreground types at once.
+        -->
+        <service
+            android:name=".service.GuardianNavigationService"
+            android:exported="false"
+            android:foregroundServiceType="location" />
 
         <service
             android:name=".service.GuardianListeningService"

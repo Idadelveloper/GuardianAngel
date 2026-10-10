@@ -11,13 +11,13 @@ thin on purpose, this project having already been bitten by a context file that 
 out of date. Kept under 32 KiB, Codex's file cap: adding a section means trimming one.
 
 Deeper references: `README.md` (product), `docs/SPEECH_STACK.md` (models and benchmarks),
-`docs/DATA_AND_AUTH.md` (storage and auth).
+`docs/DATA_AND_AUTH.md` (storage and auth), `docs/DESIGN_SYSTEM.md` (tokens and a11y).
 
 ## Verify your work
 
 ```bash
 ./gradlew :app:assembleDebug
-./gradlew :app:testDebugUnitTest        # 190 tests; includes the WCAG contrast guard
+./gradlew :app:testDebugUnitTest        # 206 tests; includes the WCAG contrast guard
 ./gradlew :app:connectedDebugAndroidTest  # 58 tests; needs a device — the real proof
 ./gradlew :app:lintDebug
 ```
@@ -133,10 +133,10 @@ fine, looks set up, and never fires.
 ### Codewords go through the gate, never straight from a transcript match
 
 `CodewordGate` (`domain/codeword/`) decides whether a spoken codeword does anything.
-Pure and time-injected, so all of it is tested. Four rules, each paid for:
+Pure and time-injected. Four rules, each paid for:
 
 - **Once per utterance.** Matching runs over a rolling window, so one phrase appears in
-  many consecutive evaluations; firing per evaluation meant tens of alerts from one word.
+  many evaluations; firing per evaluation meant tens of alerts from one word.
 - **It has to be her.** Per *chunk*, from `TranscriptChunk.isEnrolledUser`. `null` means
   *undecidable*, never "someone else": unverifiable voices may start recording (Caution)
   but may not alert anyone or cancel an alert.
@@ -158,7 +158,7 @@ replaced a session-wide `hasUnknownVoice()` flag under which, once any stranger 
 every later line *of hers* read as not-her. Codeword actions hang off this.
 
 Unknown voices are transcribed and stored like any other, labelled "Unfamiliar voice";
-`null` is undecidable and renders as the neutral "Speaker". Those two look identical in a
+`null` is undecidable and renders as the neutral "Speaker". Those look identical in a
 transcript, so `attribute()` logs the cosine score — without it a mis-labelled transcript
 cannot be told from a model that failed to load.
 
@@ -166,39 +166,34 @@ cannot be told from a model that failed to load.
 
 `RoomSessionRecorder` writes each line, sound and breadcrumb as it is decoded, because
 the moments worth recording are the moments something might kill the process. A session
-with no `endedAt` is honest, not broken. Every method swallows its own failures: losing a
+with no `endedAt` is honest, not broken. Every method swallows its failures: losing a
 line is survivable, throwing into the capture loop is not.
 
 `RoomActivityRepository` derives analytics on read, so deleting a session immediately
 stops it counting. **An account with no recordings must show nothing** — imaginary
-evidence teaches the user its records cannot be trusted.
-
-`FileTranscriptExporter` writes real text to `getExternalFilesDir("exports")` and states
-its provenance (machine-transcribed, unreviewed, labels are guesses).
+evidence teaches the user its records cannot be trusted. `FileTranscriptExporter` writes
+real text and states its provenance (machine-transcribed, unreviewed, labels are
+guesses).
 
 ### Breadcrumb trails draw themselves when there is no Maps key
 
 With the placeholder key the Maps SDK does not error — it composes a map, draws the
 watermark and renders **nothing**. An empty box in every Activity row reads as a loading
 bug, so `MapsAvailability.hasMapKey()` is checked first and `TrailCanvas` draws the path
-instead: fitted to the bounding box, longitude scaled by `cos(latitude)`, coloured
-segment by segment by the score at that moment.
+instead, longitude scaled by `cos(latitude)` and coloured by the score at each moment.
 
-When a key *is* present:
-
-- **List rows use lite mode** (`liteMode(true)`): a bitmap, not a GL surface, which is
-  what makes one per row affordable. Its default tap opens the Maps app, so wrap the
-  preview in its own click target.
-- **The detail map has every gesture disabled.** It sits in a vertical scroll, and a drag
-  meant for the page moved the camera off the route with no way back.
-- **Tapping a marker selects the incident row below it.** `MarkerInfoWindow` rasterises
-  Compose content and does not reliably draw inside a clipped non-interactive map; the
-  list is also what a screen reader can reach.
+When a key *is* present: **list rows use lite mode** (a bitmap, not a GL surface — what
+makes one per row affordable; its default tap opens the Maps app, so wrap it in your own
+click target); **the detail map has every gesture disabled**, because in a vertical
+scroll a drag meant for the page moved the camera off the route with no way back; and
+**tapping a marker selects the incident row below it**, since `MarkerInfoWindow`
+rasterises Compose content unreliably inside a clipped map and the list is what a screen
+reader can reach.
 
 Incidents are **derived on read** by `TrailBuilder`, never stored. Events further than
 45 s from any breadcrumb are dropped rather than placed — a marker an unknown distance
-from the event is read as precise. Events within 20 s collapse to the most severe, so a
-codeword is never hidden behind a flagged sentence. `TrailBuilderTest` pins it.
+from the event reads as precise. Events within 20 s collapse to the most severe.
+`TrailBuilderTest` pins it.
 
 ### Recording is not danger
 
@@ -211,10 +206,13 @@ over the top of the screen says "emergency", and recording often is not one.
 
 ### A recording left running stands itself down
 
-The watchdog stops a session after 30 min with no speech and no danger sound.
-A recording forgotten in a bag is a battery and privacy problem, and the user who forgot
-it is least likely to notice. Speech and danger events reset the timer, so an incident
-cannot time out mid-way.
+The watchdog stops a session after 30 min with no speech and no danger sound. A
+recording forgotten in a bag is a battery and privacy problem, and whoever forgot it is
+least likely to notice. Speech and danger events reset the timer.
+
+Nothing else stops it. The listening service is torn down only by an explicit disarm or
+stop — never by a lifecycle callback — so backgrounding the app or pocketing the phone
+leaves a recording running, which is the entire point of it being a foreground service.
 
 ### Alerting a guardian goes through one path
 
@@ -229,14 +227,14 @@ Danger and Emergency reach everyone in priority order, an already-sent tier is s
 unless it escalated, Safe is never suppressed — the people woken are owed the all-clear.
 A *failed* send is not remembered as sent. `GuardianNotificationAgentTest` pins it.
 
-`SmsGuardianNotifier` uses SMS: it works on one bar with no data, needs no app on the
-receiving end, and lands on a lock screen. **`SEND_SMS` is restricted on Google Play**;
-the policy lists "Physical safety/emergency alerts to send SMS" as an eligible exception,
-declared through the Permissions Declaration Form before release. Keep `telephony`
-`required="false"` or the app will not install on tablets.
+`SmsGuardianNotifier` uses SMS: one bar, no data, no app needed on the receiving end,
+lands on a lock screen. **`SEND_SMS` is restricted on Google Play**; the policy lists
+"Physical safety/emergency alerts to send SMS" as an eligible exception, declared through
+the Permissions Declaration Form before release. Keep `telephony` `required="false"` or
+the app will not install on tablets.
 
-**Ask for `SEND_SMS`, loudly.** Nothing in the app ever requested it, so every alert
-silently took the fallback while the user believed texts were going out. It is now
+**Ask for `SEND_SMS`, loudly.** Nothing ever requested it, so every alert silently took
+the fallback while the user believed texts were going out. It is now
 `GuardianCapability.SilentAlerts`, ranked just below having a guardian at all, and asked
 for on the onboarding circle step. A permission the UI never requests is a feature that
 does not exist.
@@ -246,17 +244,17 @@ mode, a dead SIM and a rejected message all looked like success. Sends carry
 `PendingIntent` receipts and `NotifyOutcome` has three states: `reached`, `failed`, and
 `unconfirmed` (no answer in eight seconds). Never fold `unconfirmed` into `reached`.
 
-Without the permission the fallback opens a pre-filled composer: WhatsApp for a single
-guardian, otherwise the SMS composer addressed to everyone at once. **WhatsApp cannot
-send on the user's behalf** — Meta offers no personal-account API, only the Business
-Cloud API from a business number with approved templates; unofficial libraries get
-accounts banned. One tap, not zero, and nothing may call it sent. The manifest
-`<queries>` block is load bearing or `getPackageInfo` always throws.
+Without it the fallback opens a pre-filled composer: WhatsApp for a single guardian,
+otherwise the SMS composer addressed to everyone at once. **WhatsApp cannot send on the
+user's behalf** — Meta offers no personal-account API, only the Business Cloud API from a
+business number with approved templates; unofficial libraries get accounts banned. One
+tap, not zero, and nothing may call it sent. The manifest `<queries>` block is load
+bearing or `getPackageInfo` always throws.
 
 `AlertComposer` writes the message: who, then where, then why. The location is a plain
 `https://www.google.com/maps/...` link — `geo:` URIs are not tappable in most SMS
-clients. Alarming lines are **quoted, never paraphrased**: softening "he grabbed my arm"
-into "an altercation" edits the evidence. A missing location is stated, not omitted.
+clients. Alarming lines are **quoted, never paraphrased**. A missing location is stated,
+not omitted.
 
 **No alert claims emergency services have been called.** Nothing in the app dials one,
 and no message says one was dialled. An automated 911 call on a false trigger is a
@@ -267,14 +265,14 @@ alert into a fatal one.
 ### Emergency rings one guardian; every other tier only texts
 
 `EmergencyCallPolicy` is pure and decides *whether*: Emergency only, one guardian
-(lowest `priority` with a number), never twice in a session, off entirely if the user
-cleared `users.callGuardianOnEmergency`. Caution ringing a phone would get the feature
-switched off within a week, and then nothing rings on the night it matters.
+(lowest `priority` with a number), never twice in a session, off if the user cleared
+`users.callGuardianOnEmergency`. Caution ringing a phone would get the feature switched
+off within a week, and then nothing rings on the night it matters.
 
-`TelephonyGuardianCaller` does it. The hard part: dialling means **starting an activity**,
-which Android forbids an app with no visible window — exactly the locked-in-a-pocket case
-this exists for, and it fails silently with no exception to catch. So app visible →
-`ACTION_CALL`; app backgrounded → a max-priority call notification whose tap dials, a
+`TelephonyGuardianCaller` does it. The hard part: dialling means **starting an
+activity**, which Android forbids an app with no visible window — exactly the
+locked-in-a-pocket case this exists for, and it fails silently. So app visible →
+`ACTION_CALL`; backgrounded → a max-priority call notification whose tap dials, a
 notification tap being a documented exception. A full-screen intent is attached only when
 `canUseFullScreenIntent()` agrees; Android 14 grants it to dialler and alarm apps only.
 
@@ -284,7 +282,7 @@ session note for a tap says "tap to connect". The call runs in parallel with the
 delivery confirmation, not after it — the message reaches the radio in milliseconds and
 only the network's *answer* takes seconds. `AlertDispatcherCallTest` pins it.
 
-`TranscriptSummariser` is deterministic for the same reasons as `SessionNarrator` below.
+`TranscriptSummariser` is deterministic for the same reasons as `SessionNarrator`.
 `AiTranscriptSummariser` is the seam for a model-written version — it may enrich the
 stored session *after* the alert, never block it.
 
@@ -293,13 +291,10 @@ stored session *after* the alert, never block it.
 `GuardianMapMarkers` draws every non-Angel pin. The default `defaultMarker()` plus an
 emoji in the title made a police station, a cluster of reported assaults and a saved safe
 place look identical until tapped — on a safety map that is the whole product failing.
-Hazards carry their count and grow slightly with it: "3 reported" and "40 reported" are
-different places. Bitmaps are cached per (kind, badge, scale) — a map re-renders on every
-camera move.
-
-Always pass `anchor = PIN_ANCHOR` (from `GuardianMapMarkers.ANCHOR_X/Y`, derived from the
-drawing geometry). Without it the SDK centres the bitmap on the coordinate and every pin
-sits half its height north of what it marks.
+Hazards carry their count and grow slightly with it. Bitmaps are cached per (kind,
+badge, scale) — a map re-renders on every camera move. Always pass `anchor = PIN_ANCHOR`
+(from `GuardianMapMarkers.ANCHOR_X/Y`): without it the SDK centres the bitmap on the
+coordinate and every pin sits half its height north of what it marks.
 
 `AngelLocationMarker` holds **one** `MarkerState` for the life of the screen and
 interpolates toward each fix, so Angel walks with the user instead of rematerialising
@@ -307,6 +302,10 @@ once a second; a jump over ~180 m snaps, because gliding across a city lies abou
 she was in between. Tapping her pulses the bitmap and shows `AngelWhereAmI` — a card in
 the top overlay, not a map info window, which is unreadable at low zoom and off-screen
 whenever the camera follows her.
+
+`MarkerDetailSheet` and `WalkingDirectionsCard` take a nullable model and own their own
+animation, so a caller never has to keep a dismissed value alive to stop the card
+emptying mid-exit.
 
 Anything pinned to the bottom of the map must clear `BottomBarClearance`, and more while
 a route sheet is up: the floating nav draws over map content, so a sheet at the bottom
@@ -317,25 +316,44 @@ edge hides behind it and one on top of it swallows taps meant for a tab.
 `SessionSummaryAgent` runs *after* `recorder.finish()`, on the teardown scope, and
 rewrites the session's title and summary. Separate from the live agents because it needs
 the whole session — which does not exist until recording stops — and because nothing
-waits on it, so a slow summary cannot delay an alert.
+waits on it, so it cannot delay an alert.
 
 `SessionNarrator` does the work: pure, deterministic, **not** a language model — an LLM
 wants a gigabyte of RAM and seconds on-device, or a round trip carrying a transcript of
-someone's worst night. Two rules: it **describes, never diagnoses** ("a sound like a slap
-or impact", never "you were assaulted"), and raw AudioSet class names never reach the
-user (`interpretSound` is that layer). Key moments are derived on read, not stored.
+someone's worst night. Two rules: **describe, never diagnose** ("a sound like a slap or
+impact", never "you were assaulted"), and raw AudioSet class names never reach the user
+(`interpretSound` is that layer). Key moments are derived on read.
 
-### Walking a route happens on the map
+### Walking a route happens on the map, and keeps going
 
 "Walk with me" used to navigate to Home — the one screen that does not show the route
-just chosen. It now enters a walking mode on the map: only the chosen polyline is drawn,
-the search bar becomes one instruction at a time, the camera follows.
+just chosen. It now enters a walking mode *on the map*: only the chosen polyline is
+drawn, the search bar becomes one instruction at a time, the camera follows.
 
-`WalkDirections` derives the turns from the polyline, because these routes are scored
-corridors with no step list. It gives real distances and directions and **must never
-invent a street name** — a confident wrong name at night is worse than none. Off-route is
-measured to the nearest *segment*: with sparse vertices, nearest-vertex reported someone
-walking down the middle of the corridor as 100 m adrift.
+`WalkDirections` derives turns from the polyline, because these routes are scored
+corridors with no step list. Real distances and directions, and it **must never invent a
+street name** — a confident wrong name at night is worse than none. Off-route measures to
+the nearest *segment*: with sparse vertices, nearest-vertex called someone walking down
+the middle of the corridor 100 m adrift.
+
+`walkingRouteId` used to be `remember`ed in the map composable, so switching tabs
+silently ended the navigation she was relying on — invisibly, which is what made it
+serious. The active trip now lives in Room (`TripRepository`, one `InProgress` row at a
+time) and `GuardianNavigationService` — a `location` FGS, separate from the microphone
+one so a walk survives standing the mic down and a recording survives arriving — keeps
+the location stream alive with the app in a pocket. Re-entering the map rebuilds the
+destination from the trip; `START_STICKY` plus the open row makes a process death
+mid-walk recoverable.
+
+Arrival is **close enough and still there** (`ArrivalDetector`: 40 m, 20 s dwell): firing
+early texts a guardian while she is still two minutes away. A fix worse than 60 m cannot
+trigger it, but one bad fix does not reset a dwell already served. Use
+`observeNavigationLocation()`, never `observeLocation()` — the latter's five-metre
+displacement filter stops emitting the moment she stops walking, so the dwell that proves
+she arrived could never complete.
+
+The arrival text goes through the same `GuardianNotifier` as an alert, so it obeys the
+same permission reality, and the trip records whether it went out.
 
 ### A stationary user still leaves breadcrumbs
 
@@ -406,7 +424,7 @@ never inline in a preview, so previews and the running app cannot drift.
 Secrets are modelled by **status, not value**: `VoiceProfile` carries a clarity score, not
 the voiceprint; `DisarmPin` carries whether a PIN is set, not the PIN.
 
-Room is at **version 4** with exported schemas and real migrations in
+Room is at **version 5** with exported schemas and real migrations in
 `GuardianDatabase.MIGRATIONS`. No destructive migration — losing a user's guardians and
 codewords is a safety regression, not an inconvenience. Transcripts, the voiceprint and
 the disarm PIN are **never uploaded**; `CloudSync` uses hand-written maps so a new column
@@ -447,45 +465,17 @@ rest of the wizard.
 
 ## Design system
 
-Theme lives in `ui/theme/`. Two accessors, no third:
+Theme lives in `ui/theme/`. Two accessors, no third: `MaterialTheme.colorScheme` /
+`.typography` / `.shapes` for standard Material roles, and `GuardianTheme.colors` /
+`.spacing` / `.shapes` / `.type` / `.windowSizeClass` for brand tokens Material has no
+slot for. **Never hard-code a hex value, dp spacing or font in a component** — if a token
+is missing, add it to the theme.
 
-- `MaterialTheme.colorScheme` / `.typography` / `.shapes` for standard Material roles
-- `GuardianTheme.colors` / `.spacing` / `.shapes` / `.type` / `.windowSizeClass` for brand
-  tokens Material has no slot for
-
-**Never hard-code a hex value, dp spacing or font in a component.** If a token is missing,
-add it to the theme.
-
-### Paired colours
-
-Accent tokens invert between light and dark; always use the paired content colour —
-`accentSoft`/`onAccentSoft`, `accentWarm`/`onAccentWarm`, `activeContainer`/
-`onActiveContainer`, `safeContainer`/`onSafeContainer`, and Material's own pairs.
-Borrowing an unrelated `on*` role looks fine in light mode and renders at ~1.3:1 in dark.
-`ColorContrastTest` catches it — run the unit tests after any colour change.
-
-### Accessibility floors
-
-4.5:1 for text, 3:1 for any non-text element that carries meaning. Three values from the
-original design document fail and have accessible siblings: `colors.focusRing` for focus,
-`colors.borderControl` for control outlines, `colors.iconMuted` for inactive nav icons.
-`borderDefault`/`borderEmphasis` are decorative dividers only.
-
-Colour is never the only signal — pair every status with a label and a distinct glyph.
-
-### Other conventions
-
-- Icons: `GuardianIcons`, stroke-based 24×24, round caps. Add there rather than pulling
-  in Material's filled glyphs.
-- Shapes: `pill` for buttons and chips, `.lg` (16 dp) cards, `.xl` (24 dp) sheets and
-  heroes, `.md` (12 dp) inputs. Buttons 52 dp; in-card pill actions 44 dp.
-- Elevation is ambient glow plus tonal layering (`guardianCardElevation`,
-  `guardianFloatingElevation`, `focalHalo`, `ambientGlow`) — **not** Material tonal
-  elevation, which double-tints the surface.
-- No dynamic colour. The palette is a safety signal; wallpaper must not repaint it.
-- Inside a vertically scrolling column, build grids from chunked `Row`s. A
-  `LazyVerticalGrid` nested in a same-orientation scroll will crash.
-- Window insets go **outside** the scroll modifier, or the padding scrolls away.
+Paired colours, accessibility floors, icon and shape conventions, and the Compose traps
+this codebase has already hit: **[docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)**. Read it
+before touching a screen. The one that bites hardest: borrowing an unrelated `on*` role
+looks fine in light mode and renders at ~1.3:1 in dark, so run the unit tests after any
+colour change — `ColorContrastTest` is what catches it.
 
 ## Angel (the mascot)
 
@@ -544,13 +534,12 @@ factors (race, age) are opt-in, off by default, and never inferred.
 
 ## Current state and what is next
 
-Done: UI, navigation and auth gate; the mascot; Room v4 with real migrations and
-Keystore-encrypted secrets; accounts ready for Firebase; the speech cascade **proven on
-device**; session recording with transcripts, trails, derived incidents, analytics,
-export, deletion and an after-the-fact summary; the Berkeley safest-route map with live
-Maps Compose, fused GPS, themed pins, Places search, safe places, derived walking
-directions, and scoring over BPD/UCPD cells and NWS weather; guardian alerting by SMS
-with delivery receipts, a WhatsApp fallback, and a call to the first guardian. See
+Done: UI, navigation and auth gate; the mascot; Room v5 with real migrations; the speech
+cascade **proven on device**; session recording with transcripts, trails, analytics,
+export, deletion and an after-the-fact summary; the Berkeley map with live Maps Compose,
+themed pins, Places search, safe places, derived walking directions, persistent
+navigation, arrival detection and a journeys log; alerting by SMS with delivery receipts,
+a WhatsApp fallback, an arrival text and a call to the first guardian. See
 `docs/BERKELEY_*.md`.
 
 Next, roughly in order:
@@ -559,12 +548,11 @@ Next, roughly in order:
    automated can say how the wake word behaves with her voice, through a pocket, with a
    television on. She has not yet said it aloud to an armed build.
 2. **Tier 3 reasoning** — an LLM assessor over text for the ambiguous 0.30–0.60 band.
-3. **Room-back `GuardianRepository` and `RouteRepository`.** `ActivityRepository` is done;
-   Home still reads `FakeGuardianRepository`, so its mascot and score bypass
+3. **Room-back `GuardianRepository` and `RouteRepository`.** Home still reads
+   `FakeGuardianRepository`, so its mascot and score bypass the
    `GuardianSafetyStateResolver` that Map already uses.
-4. **Navigation polish** — no animation to the selected path, no Angel chat-bubble
-   directions, no persistent navigation when the app
-   is backgrounded.
+4. **Navigation polish** — no camera animation to a selected path, no Angel chat-bubble
+   directions.
 5. **APK size** — 269 MB with models bundled; needs first-run download or Play Asset
    Delivery before release. It no longer fits on a near-full emulator.
 6. **Localise** the inline copy into `strings.xml`.

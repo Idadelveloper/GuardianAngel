@@ -34,8 +34,9 @@ import androidx.sqlite.execSQL
         LocationPointEntity::class,
         SafePlaceEntity::class,
         DisarmPinEntity::class,
+        TripEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class GuardianDatabase : RoomDatabase() {
@@ -48,6 +49,7 @@ abstract class GuardianDatabase : RoomDatabase() {
     abstract fun sessionDao(): SessionDao
     abstract fun safePlaceDao(): SafePlaceDao
     abstract fun disarmPinDao(): DisarmPinDao
+    abstract fun tripDao(): TripDao
     abstract fun syncDao(): SyncDao
 
     companion object {
@@ -108,11 +110,56 @@ abstract class GuardianDatabase : RoomDatabase() {
         }
 
         /**
+         * Adds the `trips` table.
+         *
+         * Hand-written to match Room's generated schema exactly — a column order or a
+         * missing index makes `validateMigration` fail at runtime on an upgraded
+         * install while a fresh install works perfectly, which is the worst way to
+         * find out.
+         */
+        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(connection: androidx.sqlite.SQLiteConnection) {
+                connection.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `trips` (
+                        `id` TEXT NOT NULL,
+                        `userId` TEXT NOT NULL,
+                        `destinationName` TEXT NOT NULL,
+                        `destinationAddress` TEXT NOT NULL,
+                        `destinationLat` REAL NOT NULL,
+                        `destinationLng` REAL NOT NULL,
+                        `originLat` REAL,
+                        `originLng` REAL,
+                        `routeId` TEXT,
+                        `routeLabel` TEXT,
+                        `startedAt` INTEGER NOT NULL,
+                        `endedAt` INTEGER,
+                        `outcome` TEXT NOT NULL,
+                        `distanceMeters` INTEGER,
+                        `notifyContactId` TEXT,
+                        `notifyContactName` TEXT,
+                        `notifyMessage` TEXT,
+                        `arrivalNotifiedAt` INTEGER,
+                        `arrivalNotifyError` TEXT,
+                        `updatedAt` INTEGER NOT NULL,
+                        `syncedAt` INTEGER,
+                        PRIMARY KEY(`id`),
+                        FOREIGN KEY(`userId`) REFERENCES `users`(`id`)
+                            ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent()
+                )
+                connection.execSQL("CREATE INDEX IF NOT EXISTS `index_trips_userId` ON `trips` (`userId`)")
+                connection.execSQL("CREATE INDEX IF NOT EXISTS `index_trips_outcome` ON `trips` (`outcome`)")
+            }
+        }
+
+        /**
          * All migrations, in order. Each schema change adds one here rather than
          * bumping the version and hoping.
          */
         val MIGRATIONS: Array<androidx.room.migration.Migration> =
-            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+            arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 
         @Volatile
         private var instance: GuardianDatabase? = null

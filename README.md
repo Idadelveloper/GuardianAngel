@@ -154,10 +154,20 @@ voices (yours is enrolled during setup). It flags danger signals in the transcri
 repeated refusals, raised voices, sounds that imply a struggle — and uses them, together
 with location and time of day, to decide whether to escalate.
 
-Every session lands in the Activity log with Angel's summary, the peak volume, the
-lowest safety score it reached, and the full diarized timeline. Each one is pinned to
-where it was recorded. Review, export and delete are modelled today; annotating and
-bookmarking are on the roadmap.
+Unknown voices are transcribed and kept like any other, labelled **Unfamiliar voice** —
+isolating your voice is what the voiceprint is for, not a reason to throw away what
+anyone else said. Non-speech sounds go in too: a scream, breaking glass, a sound like an
+impact, running footsteps.
+
+When the recording stops, a separate summary agent reads the whole session and writes its
+**title, a short summary and the key moments** — the points worth jumping to, timed from
+the start. It runs after the fact precisely so it can never slow down an alert. It
+describes rather than diagnoses: "a sound like a slap or impact", never "you were
+assaulted", because this text ends up in an export someone may hand to a police officer.
+
+Every session lands in the Activity log with that summary, the peak volume, the lowest
+safety score it reached, and the full diarized timeline, pinned to where it was recorded.
+Review, export and delete all work. Annotating and bookmarking are on the roadmap.
 
 ### Location Safety Score
 
@@ -183,29 +193,67 @@ do on her behalf.
 
 The Map tab routes by safest path rather than shortest, using the same data as the score.
 Pick a destination and it compares a well-lit corridor against the faster shortcut, with
-the safety score, lighting and safe-haven count for each. Committing to a route arms the
-guardian and starts the walk.
+the safety score, lighting and safe-haven count for each.
 
-*The routing and the map surface are both simulated — see the note under [Map](#map).*
+**Walk with Angel** then starts a journey. Only the route you chose stays drawn, the
+search bar is replaced by one instruction at a time, and the camera follows you. Turns
+are worked out from the shape of the route, so distances and directions are real but
+street names are not available — the card says so rather than inventing one.
 
-### Safe Walk
+A journey is **not screen state**. It is stored, and a foreground service keeps it alive,
+so switching tabs, locking the phone or putting it in a pocket does not stop Angel walking
+with you. Coming back to the map picks up exactly where you were. The walk ends when you
+arrive or when you tap End walk — never because you looked at something else.
 
-A monitored journey with an expected arrival time. If you don't check in by the ETA, your
-guardians are notified automatically.
+### Arrival, and telling someone
+
+When you pick a destination, Angel asks once whether to tell someone when you get there.
+Choose a guardian, optionally add your own message, and the moment you arrive they get a
+text with the time you arrived. Telling nobody is one tap and is the default.
+
+Arrival means **close enough and still there** — within 40 m for twenty seconds — so
+walking past the end of the street does not fire it, and a vague cell-tower fix cannot
+either. If the text could not be sent, the journey log says so instead of implying it was.
+
+### The journeys log
+
+Every walk is kept: where to, when, how long it took, how far, which route, whether you
+arrived, and whether the arrival text went out. A walk you ended early is recorded
+neutrally — plans change, and a log that reads as a reprimand is one you would switch off.
 
 ### Trusted circle
 
-Up to five emergency contacts, ranked, each with a name, relationship and number. The
-home screen shows who is actually reachable right now — knowing your top contact is
-offline *before* something happens is the point. Your first guardian cannot be removed;
-an empty circle would make every other feature pointless.
+Up to five emergency contacts, ranked, each with a name, relationship and number. Your
+first guardian cannot be removed; an empty circle would make every other feature
+pointless.
+
+**Alerts go out by SMS.** It works on one bar with no data, needs no app on the receiving
+end, and lands on any lock screen. The text names who, where (as a tappable maps link)
+and why, quoting what was actually said rather than paraphrasing it. Sends are confirmed
+against the network, so "sent" means sent — a message still in flight is reported as
+still in flight, not as delivered.
+
+That needs `SEND_SMS`, which Android treats as a restricted permission and the app asks
+for explicitly — on the setup step where you add guardians, and from the home screen if
+it is missing. Without it, an alert opens a pre-filled composer (WhatsApp for a single
+guardian, otherwise your messaging app) and waits for one tap. The app always says which
+of the two you have.
+
+**WhatsApp cannot send on your behalf**, and no amount of engineering changes that: Meta
+offers no API for a personal account, only the Business Cloud API from a business number
+with pre-approved templates. The deep link is one tap, never zero, and nothing in the app
+describes it as sent.
+
+On the **Emergency** tier only, and only if you leave it switched on, Angel also rings
+your first guardian right after the text. Nothing in this app dials emergency services,
+and nothing in it will ever tell you it has.
 
 ---
 
 ## Screens
 
-Four tabs, a six-page setup wizard, and five stacked sub-screens — a session detail view
-plus wake word, codewords, guardians and voice calibration.
+Four tabs, a five-step setup wizard, and six stacked sub-screens — a session detail view
+plus wake word, codewords, guardians, safe places and voice calibration.
 
 ### Home
 
@@ -236,18 +284,22 @@ confirmation dialog.
 ### Map
 
 Standby shows the home geofence, a search bar and quick destinations. Picking one draws
-both corridors — the safe route as a solid glowing line, the unlit shortcut dashed with a
-warning marker — and opens a sheet comparing them. **Walk with Angel** arms the guardian
-and hands off to Home's journey state.
+the corridors and opens a sheet comparing them. **Walk with Angel** starts the journey
+described above, on this screen.
+
+Pins are the app's own, not Google's defaults: home, saved safe places, verified safe
+havens, reported-incident clusters carrying their own count, and your destination. Angel
+herself marks where you are — she interpolates between fixes so she walks alongside you
+rather than reappearing every second, and tapping her says where you are ("You're home",
+or the safe place you are standing in).
 
 If location is off, a banner at the top offers to turn it on — the map is the screen where
 its absence is most obvious, so it is where the offer belongs.
 
-> **The Maps API key is a placeholder.** `maps-compose` is wired in and the map composes,
-> but `com.google.android.geo.API_KEY` in `AndroidManifest.xml` is still
-> `AIzaSyPlaceholderGuardianAngelKey`, so no tiles will load until a real key is dropped
-> in. `RouteCanvas`, the stylised canvas the map replaced, is still used for the route
-> preview on a session's detail screen.
+> **A real Maps API key is required.** With the placeholder key the SDK does not error; it
+> composes a map, draws the Google watermark and renders nothing. `MapsAvailability`
+> checks for a real key and falls back to drawing trails on a canvas, so a missing key
+> degrades honestly instead of showing empty boxes.
 
 ### Activity
 
@@ -262,6 +314,9 @@ happened there, quoting what was captured rather than paraphrasing it.
 The pins are worked out when the session is read, not when it is recorded, so a walk
 logged last month benefits from any later improvement to what counts as notable. Tapping a session opens the full diarized timeline — who said what when, which
 sounds the acoustic model flagged, and what Angel did about it.
+
+A third segment, **Journeys**, is the walk log: every trip with its duration, distance,
+route and outcome, and what happened to the arrival text.
 
 The design brief had the log and the analytics as separate screens. Folding them into one
 tab keeps the bottom bar at four entries and means the user does not have to remember
@@ -389,7 +444,7 @@ ui/
 
 ### Storage and accounts
 
-Room, twelve tables, all hanging off one `users` row — full detail in
+Room, thirteen tables, all hanging off one `users` row — full detail in
 **[docs/DATA_AND_AUTH.md](docs/DATA_AND_AUTH.md)**. Schemas are exported to
 `app/schemas/` and checked in, so every migration is a reviewable diff.
 
@@ -509,15 +564,17 @@ Two design rules fell out of that work and are worth stating:
   comparable between inputs of similar duration; the same speech at 1 s versus 2 s scores
   −0.03, as if two strangers.
 
-Still pending: tier 3's LLM assessor for the ambiguous band, Room-backed session history,
-and tuning thresholds against real speech — which no automated test can settle. The APK is
-240 MB with models bundled: fine for sideloading, over Play's 150 MB ceiling. Checklist of
-what only you can do: **[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
+Session history is Room-backed and real. Still pending: tier 3's LLM assessor for the
+ambiguous band, and tuning thresholds against real speech — which no automated test can
+settle. The APK is 269 MB with models bundled: fine for sideloading, over Play's 150 MB
+ceiling. Checklist of what only you can do:
+**[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
 
 ### Tech
 
 Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
-Coroutines + Flow · ViewModel · LiteRT 1.4.2 · sherpa-onnx 1.13.8 ·
+Coroutines + Flow · ViewModel · Room 2.8.5 (schema v5, real migrations) ·
+maps-compose 6.5.0 · LiteRT 1.4.2 · sherpa-onnx 1.13.8 ·
 `minSdk` 24, `targetSdk` 37
 
 ## Building
@@ -564,7 +621,7 @@ many thin pointers.
 - [x] Angel mascot — five animated tiers driven by the safety score
 - [x] Navigation: four tabs, setup wizard, stacked sub-screens
 - [x] Home — sanctuary, out & about, and recording states
-- [x] Map — standby and safest-route comparison (stylised canvas)
+- [x] Map — real Google Maps, safest-route comparison, app-drawn pins
 - [x] Activity — session log, diarized transcript, movement insights
 - [x] Settings — hub plus wake word, codewords, guardians and voice sub-screens
 - [x] Onboarding — account, permissions, voice, guardians, wake word, codewords
@@ -608,16 +665,30 @@ many thin pointers.
 
 ### Data
 
-- [x] Room database — twelve tables, exported schemas, Keystore-encrypted secrets
+- [x] Room database — thirteen tables, schema v5, exported schemas and real migrations
 - [x] Anonymous accounts, with email/password and phone linking ready for Firebase
 - [x] Opt-in cloud backup that cannot upload transcripts
 - [x] Contact picker, and real runtime permission requests in onboarding
 - [x] Domain models and repository contracts for every feature area
-- [ ] Room-back the remaining repositories (sessions, analytics, routes) — the home
-      snapshot is still sample content, which is why the setup card reads live state
-      from the repositories that are real rather than from the snapshot
+- [x] Room-backed sessions, transcripts, breadcrumbs, analytics and journeys
+- [x] Transcript export, with a provenance statement, and session deletion
+- [ ] Room-back the last two repositories (guardian snapshot, routes) — the home snapshot
+      is still sample content, which is why the setup card reads live state from the
+      repositories that are real rather than from the snapshot
 - [ ] SQLCipher for the whole database, not just the credential columns
-- [ ] Transcript export, annotation and deletion
+- [ ] Transcript annotation and bookmarking
+
+### Alerting
+
+- [x] One dispatch path for the SOS hold and every codeword tier
+- [x] SMS with the location as a tappable link, quoting what was said
+- [x] Delivery confirmed against the network — `reached`, `failed`, `unconfirmed`
+- [x] `SEND_SMS` asked for where the reason is obvious, and surfaced on Home when missing
+- [x] WhatsApp / messaging-app fallback, labelled as needing a tap
+- [x] A call to the first guardian on the Emergency tier, switchable off
+- [x] Arrival text with a timestamp and an optional message of your own
+- [ ] Play Permissions Declaration for `SEND_SMS` before any release
+- [ ] Guardian-side acknowledgement, so she can see the alert was read
 
 ### Route & Map Experience
 - [x] Real Google Maps Compose screen with fused location updates, follow-mode, and recenter
@@ -626,7 +697,13 @@ many thin pointers.
 - [x] Home & Safe Location configuration (persisted to Room, geofence hysteresis, 100% Sanctuary score)
 - [x] Deterministic walking route evaluator (safest, fastest, well-lit options; BPD & UCPD crime cells, NWS weather)
 - [x] Privacy-preserving map markers (150m cell clusters, 24/7 safe havens, route hazard warnings, legend)
+- [x] Walking mode — only the chosen route drawn, turn-by-turn derived from its geometry
+- [x] Navigation that survives leaving the screen, the app and the lock screen, via a
+      location foreground service and a trip stored in Room
+- [x] Arrival detection (close enough *and* still there) and an opt-in arrival text
+- [x] Journeys log — duration, distance, route, outcome, and what happened to the text
 - [ ] User-supplied Maps API key for production deployment (documented in `docs/BERKELEY_MAPS_SETUP.md`)
+- [ ] Animate the camera to a path when it is selected, and Angel chat-bubble directions
 - [ ] Wearable companion
 
 ## Privacy
@@ -655,9 +732,11 @@ than describing an intention.
 
 - **Transcript text is stored unencrypted** in Room. Only the voiceprint and the PIN are
   encrypted; whole-database encryption (SQLCipher) is on the roadmap.
-- **There is no way to delete an individual transcript** from the UI yet.
-- **Location is not wired.** The safety score and session breadcrumbs use placeholder
-  values, so nothing real is shared with anyone.
+- **Location is real now**, and so is what it enables: breadcrumbs during a recording, a
+  maps link in an alert, and a journey a foreground service follows. Granting location
+  means the app knows where you are whenever it is listening or walking with you.
+- **An arrival text is sent to a real person.** It goes only to the guardian you picked,
+  only for the journey you picked them on.
 
 Treat this as a build under active development: the privacy architecture is real, but it
 is not finished, and you should not put sensitive personal data into it yet.

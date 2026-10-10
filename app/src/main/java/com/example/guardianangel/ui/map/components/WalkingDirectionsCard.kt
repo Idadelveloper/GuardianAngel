@@ -51,6 +51,8 @@ fun WalkingDirectionsCard(
     currentLocation: GeoPoint?,
     onEndWalk: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Who gets a text on arrival, when she asked for that. */
+    arrivalContactName: String? = null,
 ) {
     val steps = remember(route.id, route.path) { WalkDirections.stepsFor(route.path) }
     val progress = remember(steps, currentLocation) {
@@ -154,8 +156,11 @@ fun WalkingDirectionsCard(
             Text(
                 // Said plainly rather than hidden. Derived turns are accurate about
                 // distance and direction and have no street names, and a user who knows
-                // that trusts the ones they do get.
-                text = "Turns worked out from the route shape — no street names.",
+                // that trusts the ones they do get. The arrival promise replaces it once
+                // made, because that is the more useful reminder while walking.
+                text = arrivalContactName
+                    ?.let { "I'll text $it when you arrive." }
+                    ?: "Turns worked out from the route shape — no street names.",
                 style = GuardianTheme.type.labelSm,
                 color = GuardianTheme.materialColors.onSurfaceVariant,
                 modifier = Modifier.weight(1f),
