@@ -3,6 +3,8 @@ package com.example.guardianangel.ui.activities
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import android.content.Context
+import android.content.Intent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -16,8 +18,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -26,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.guardianangel.data.ActivitySamples
 import com.example.guardianangel.domain.model.DiarizedEntry
+import com.example.guardianangel.domain.model.SessionTrail
 import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.SpeakerKind
 import com.example.guardianangel.domain.repository.ActivityRepository
@@ -38,9 +45,11 @@ import com.example.guardianangel.ui.home.components.TonalPill
 import com.example.guardianangel.ui.icons.GuardianIcons
 import com.example.guardianangel.ui.map.RouteCanvas
 import com.example.guardianangel.ui.theme.GuardianAngelTheme
+import com.example.guardianangel.ui.trail.SessionTrailSection
 import com.example.guardianangel.ui.theme.GuardianTheme
 import com.example.guardianangel.ui.theme.SafetyLevel
 import com.example.guardianangel.ui.theme.safetyColorsFor
+import java.io.File
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -62,23 +71,71 @@ fun SessionDetailRoute(
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     val session by repository.observeSession(sessionId)
         .collectAsStateWithLifecycle(initialValue = null)
+    val trail by repository.observeTrail(sessionId)
+        .collectAsStateWithLifecycle(initialValue = SessionTrail(sessionId, emptyList(), emptyList()))
+    var exportState by remember { mutableStateOf<ExportState>(ExportState.Idle) }
 
     SessionDetailScreen(
         session = session,
+        trail = trail,
         onBack = onBack,
-        onExport = { scope.launch { repository.exportSession(sessionId) } },
+        exportState = exportState,
+        onExport = {
+            exportState = ExportState.Running
+            scope.launch {
+                // The result was previously thrown away, so "Export transcript" wrote a
+                // file nobody could find — and before that, wrote no file at all.
+                exportState = runCatching { repository.exportSession(sessionId) }.fold(
+                    onSuccess = { ExportState.Done(it) },
+                    onFailure = {
+                        ExportState.Failed(it.message ?: "The export could not be written.")
+                    },
+                )
+            }
+        },
+        onShare = { path -> context.shareTranscript(path) },
         modifier = modifier,
     )
+}
+
+/** Where an export has got to, so the button can report rather than guess. */
+sealed interface ExportState {
+    data object Idle : ExportState
+    data object Running : ExportState
+    data class Done(val path: String) : ExportState
+    data class Failed(val message: String) : ExportState
+}
+
+/**
+ * Hands the file to whatever the user wants to send it with.
+ *
+ * Shared as plain text content rather than a file URI: a `content://` URI needs a
+ * `FileProvider` and a grant per target app, and for a transcript the text *is* the
+ * evidence. This way it pastes into a message, an email or a notes app with nothing to
+ * configure and nothing to go wrong at the moment it is needed.
+ */
+private fun Context.shareTranscript(path: String) {
+    val body = runCatching { File(path).readText() }.getOrNull() ?: return
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, "Guardian Angel session record")
+        putExtra(Intent.EXTRA_TEXT, body)
+    }
+    runCatching { startActivity(Intent.createChooser(intent, "Share session record")) }
 }
 
 @Composable
 fun SessionDetailScreen(
     session: MonitoredSession?,
+    trail: SessionTrail,
     onBack: () -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
+    exportState: ExportState = ExportState.Idle,
+    onShare: (String) -> Unit = {},
 ) {
     GuardianStackScaffold(
         title = "Session",
@@ -86,12 +143,40 @@ fun SessionDetailScreen(
         modifier = modifier,
         bottomBar = session?.let {
             {
-                GuardianPrimaryButton(
-                    text = "Export transcript",
-                    onClick = onExport,
-                    leadingIcon = GuardianIcons.Lock,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Column {
+                    when (exportState) {
+                        is ExportState.Done -> Text(
+                            text = "Saved to ${exportState.path.substringAfterLast('/')}",
+                            style = GuardianTheme.type.bodySm,
+                            color = GuardianTheme.materialColors.onSurfaceVariant,
+                            modifier = Modifier.padding(bottom = GuardianTheme.spacing.xs),
+                        )
+
+                        is ExportState.Failed -> Text(
+                            text = exportState.message,
+                            style = GuardianTheme.type.bodySm,
+                            color = GuardianTheme.materialColors.error,
+                            modifier = Modifier.padding(bottom = GuardianTheme.spacing.xs),
+                        )
+
+                        else -> Unit
+                    }
+
+                    GuardianPrimaryButton(
+                        text = when (exportState) {
+                            ExportState.Running -> "Exporting…"
+                            is ExportState.Done -> "Share this record"
+                            else -> "Export transcript"
+                        },
+                        onClick = {
+                            val done = exportState as? ExportState.Done
+                            if (done != null) onShare(done.path) else onExport()
+                        },
+                        enabled = exportState != ExportState.Running,
+                        leadingIcon = GuardianIcons.Lock,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
             }
         },
     ) {
@@ -168,26 +253,11 @@ fun SessionDetailScreen(
         }
 
         // --- Where it happened ------------------------------------------------------
-        GuardianCard(contentPadding = GuardianTheme.spacing.md) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .clip(GuardianTheme.shapes.md),
-            ) {
-                RouteCanvas(
-                    routes = emptyList(),
-                    showGeofence = true,
-                    modifier = Modifier.fillMaxWidth().height(140.dp),
-                )
-            }
-            Spacer(Modifier.height(GuardianTheme.spacing.sm))
-            Text(
-                text = "Breadcrumb trail stored encrypted on this device.",
-                style = GuardianTheme.type.labelSm,
-                color = GuardianTheme.materialColors.onSurfaceVariant,
-            )
-        }
+        //
+        // The real breadcrumb trail. This drew `RouteCanvas(routes = emptyList())` — an
+        // empty decorative map with a caption claiming a trail was stored, under a
+        // session whose actual breadcrumbs were sitting unread in the database.
+        SessionTrailSection(trail = trail)
 
         // --- Diarized stream --------------------------------------------------------
         if (session.entries.isNotEmpty()) {
@@ -325,6 +395,7 @@ private fun SessionDetailPreview() {
     GuardianAngelTheme {
         SessionDetailScreen(
             session = ActivitySamples.sessions.first(),
+            trail = SessionTrail("preview", emptyList(), emptyList()),
             onBack = {}, onExport = {},
         )
     }

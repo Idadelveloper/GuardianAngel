@@ -41,6 +41,28 @@ data class TranscriptChunk(
     val endMillis: Long,
     /** Diarization label when available, e.g. "spk0". Null when not diarizing. */
     val speakerTag: String? = null,
+    /**
+     * Whether *this* segment was the enrolled user.
+     *
+     * Per chunk, not per session. The session-level question — "has any stranger spoken
+     * at all" — was being used to decide whether the user said a codeword, so one
+     * stranger speaking once made every later line read as not-her, and before that a
+     * stranger's words counted as hers. Codeword actions hang off this, so it has to be
+     * about the words that were actually said.
+     *
+     * Null when it could not be judged: no voiceprint enrolled, no speaker model, or too
+     * little speech in the segment to embed. Null means *unknown*, never *not her* — the
+     * difference decides whether a codeword is acted on or quietly dropped.
+     */
+    val isEnrolledUser: Boolean? = null,
+)
+
+/** Who the speaker-identification tier thinks said a segment. */
+data class SpeakerAttribution(
+    /** Stable cluster label within the session, e.g. "spk0". */
+    val tag: String?,
+    /** True when it matched the enrolled voiceprint; null when undecidable. */
+    val isEnrolledUser: Boolean?,
 )
 
 /**

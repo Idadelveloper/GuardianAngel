@@ -10,6 +10,8 @@ import com.example.guardianangel.domain.model.ListeningSensitivity
 import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.MovementAnalytics
 import com.example.guardianangel.domain.model.OnboardingStep
+import com.example.guardianangel.domain.model.SessionTrail
+import com.example.guardianangel.domain.model.TrailPoint
 import com.example.guardianangel.domain.model.RoutePlan
 import com.example.guardianangel.domain.model.RoutePreference
 import kotlinx.coroutines.flow.Flow
@@ -74,6 +76,23 @@ interface ActivityRepository {
     fun observeSession(sessionId: String): Flow<MonitoredSession?>
     fun observeAnalytics(range: AnalyticsRange): Flow<MovementAnalytics>
 
+    /**
+     * Where one session went, and what happened along the way.
+     *
+     * Separate from [observeSession] because the detail screen needs it and the list
+     * does not — loading every transcript line to draw a thumbnail would be wasteful.
+     */
+    fun observeTrail(sessionId: String): Flow<SessionTrail>
+
+    /**
+     * Paths only, for the previews in a list.
+     *
+     * Batched into one query rather than one per row: a screen of twenty sessions
+     * should not mean twenty round trips, and the preview needs no incidents to draw
+     * the shape of a walk.
+     */
+    fun observeTrailPaths(): Flow<Map<String, List<TrailPoint>>>
+
     /** Produces an encrypted ledger for sharing. Returns a user-facing file name. */
     suspend fun exportSession(sessionId: String): String
     suspend fun deleteSession(sessionId: String)
@@ -88,4 +107,5 @@ interface RouteRepository {
     suspend fun clearDestination()
     suspend fun setPreference(preference: RoutePreference)
     suspend fun selectCustomDestination(destination: Destination) = Unit
+    suspend fun updateOrigin(originPoint: com.example.guardianangel.domain.model.GeoPoint) = Unit
 }

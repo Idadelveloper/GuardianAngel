@@ -141,6 +141,101 @@ piece scores — `tokens.txt` does not). Greedy longest-match matched sherpa's r
 `bpe.model`; validate a typed phrase with `canUseWakePhrase` before saving, because an
 unrepresentable phrase saves fine, looks set up, and never fires.
 
+### Codewords go through the gate, never straight from a transcript match
+
+`CodewordGate` (`domain/codeword/`) decides whether a spoken codeword does anything. Pure
+and time-injected, so all of it is unit-tested. Four rules, each paid for:
+
+- **Once per utterance.** Matching runs over a rolling transcript window, so one phrase
+  appears in many consecutive evaluations. Firing per evaluation meant tens of alerts
+  from one word.
+- **It has to be her.** Decided per *chunk* from `TranscriptChunk.isEnrolledUser`, not
+  from a session-wide flag. `null` means *undecidable*, never "someone else":
+  unverifiable voices may start recording (Caution) but may not alert anyone or cancel an
+  alert.
+- **Acting on people waits.** Danger holds 10 s, Emergency 4 s, so an accident can be
+  taken back. The service's watchdog polls `dueForDispatch()`; nothing dispatches from
+  the transcript callback.
+- **Safe cancels anything pending**, which is what makes the hold worth having.
+
+`CodewordGateTest` pins twenty cases. Never add a path that calls `dispatchAlert`
+directly from a transcript match.
+
+### Per-chunk speaker attribution
+
+`SherpaSpeakerIdentifier.attribute()` returns the cluster tag *and* whether it was the
+enrolled user, from one embedding. `SherpaTranscriber.attributeSpeaker` is the hook, wired
+by the session so one 28 MB speaker model serves the wake-word gate, diarization and
+per-line attribution.
+
+This replaced `!speakers.hasUnknownVoice()`, a session-wide flag: once any stranger had
+spoken, every later line *of hers* read as not-her, and until then a stranger's words
+read as hers. Codeword actions hang off this.
+
+### Sessions are written as they happen, never buffered
+
+`SessionRecorder` / `RoomSessionRecorder` writes each line, sound and breadcrumb as it is
+decoded, because the moments worth recording are the moments something might kill the
+process. A session with no `endedAt` is honest, not broken, and the insights say so.
+
+Every method swallows its own failures: losing a line is survivable, throwing back into
+the capture loop and stopping the recording is not.
+
+`RoomActivityRepository` derives analytics on read, so deleting a session immediately
+stops it counting. It replaced `FakeActivityRepository`, which served three invented
+incidents to every account. **An account with no recordings must show nothing** — an app
+that displays imaginary evidence teaches the user its records cannot be trusted.
+
+`FileTranscriptExporter` writes real text to `getExternalFilesDir("exports")` and states
+its own provenance (machine-transcribed, unreviewed, labels are guesses). The previous
+implementation returned `"guardian-angel-<id>.pdf"` and wrote nothing.
+
+### Breadcrumb trails draw themselves when there is no Maps key
+
+With the placeholder key the Maps SDK does not error — it composes a map, draws the
+Google watermark and renders **nothing**. An empty box in every Activity row reads as a
+loading bug, so `MapsAvailability.hasMapKey()` is checked first and `TrailCanvas` draws
+the path instead: fitted to the bounding box, longitude scaled by `cos(latitude)` so
+walks are not stretched, and coloured segment by segment by the score at that moment.
+
+When a key *is* present:
+
+- **List rows use lite mode** (`GoogleMapOptions().liteMode(true)`). It renders a bitmap
+  rather than a GL surface, which is what makes one per row affordable — the use case
+  Google documents it for. Lite mode's default tap launches the Maps app, so the whole
+  preview is wrapped in its own click target instead.
+- **The detail map has every gesture disabled.** It sits in a vertical scroll, and with
+  panning on, a drag meant for the page moved the camera off the route with no way back.
+  "Open in Maps" is the way out.
+- **Tapping a marker selects the incident row below it.** `MarkerInfoWindow` rasterises
+  Compose content and does not reliably draw inside a clipped non-interactive map; the
+  list is also the surface a screen reader can reach. The marker click returns `false`
+  so the bubble still shows where it can.
+
+Incidents are **derived on read** by `TrailBuilder`, never stored: what counts as notable
+changes as the heuristics improve, and a session recorded last month should benefit from
+today's understanding of it. Events further than 45 s from any breadcrumb are dropped
+rather than placed — a marker an unknown distance from the event is read as precise.
+Events within 20 s of each other collapse to the most severe, so a codeword is never
+hidden behind a flagged sentence. `TrailBuilderTest` pins all of it.
+
+### Recording is not danger
+
+`AngelMood.fromScore(inDuress = …)` takes an *actual* duress trigger, not "is recording".
+Passing `isRecording` pinned Angel to her Critical strobe for every recording, including
+one started by a tap on a quiet street. Her mood tracks the live safety score, which is
+an average of several factors and moves in real time.
+
+The live transcript card sits **below** the hero for the same reason: a panel that takes
+over the top of the screen says "emergency", and recording often is not one.
+
+### A recording left running stands itself down
+
+The service watchdog stops a session after 30 minutes with no speech and no danger sound.
+A recording forgotten in a bag is a battery drain and a privacy problem, and the user who
+forgot it is least likely to notice. Speech and danger events both reset the timer, so an
+incident cannot time out mid-way.
+
 ### Stubs must never fake success
 
 A detector or model stand-in that reports a match would make hands-free look like it
@@ -377,7 +472,14 @@ linking ready for Firebase; opt-in cloud backup that cannot upload transcripts; 
 speech cascade wired and **proven on device** — detection on recorded speech, no false
 accept on unrelated speech, the speaker gate in both directions, enrolment producing a
 usable voiceprint, re-arming after release, manual recording, and wake-word persistence
-through the real Room store.
+through the real Room store; **Berkeley safest-route prototype** complete with live Google
+Maps Compose screen, fused GPS tracking, Angel mascot live marker with mood synchronization
+and floating text status bubble, Places Autocomplete destination search, Home & Safe Location
+Room persistence (`SafePlaceDao`) with geofence hysteresis (80m enter, 105m exit) and Sanctuary
+semantics (score 100% at Home unless under active emergency override), deterministic multi-factor
+route safety evaluation over official Berkeley BPD/UCPD spatial cells and NWS weather, and privacy-preserving
+markers with legend. Documents: `docs/BERKELEY_MAPS_SETUP.md`, `docs/BERKELEY_DATA_MANIFEST.md`,
+`docs/BERKELEY_INGESTION_REPORT.md`.
 
 Next, roughly in order:
 

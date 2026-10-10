@@ -30,7 +30,6 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.guardianangel.data.ActivitySamples
 import com.example.guardianangel.data.GuardianSamples
 import com.example.guardianangel.domain.model.CodewordTier
 import com.example.guardianangel.domain.model.GuardianCapability
@@ -38,9 +37,14 @@ import com.example.guardianangel.domain.model.GuardianSetup
 import com.example.guardianangel.domain.model.guardianSetup
 import com.example.guardianangel.domain.model.GuardianMode
 import com.example.guardianangel.domain.model.GuardianSnapshot
+import com.example.guardianangel.domain.model.MonitoredSession
+import com.example.guardianangel.domain.model.TrailPoint
+import com.example.guardianangel.domain.model.RecordingSession
 import com.example.guardianangel.domain.model.ListeningRequirement
 import com.example.guardianangel.domain.model.ListeningStatus
 import com.example.guardianangel.domain.model.WakeWord
+import com.example.guardianangel.domain.model.ActivityFilter
+import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.domain.repository.CodewordRepository
 import com.example.guardianangel.domain.repository.ContactsRepository
 import com.example.guardianangel.domain.repository.PermissionProbe
@@ -89,6 +93,7 @@ fun HomeRoute(
     codewordRepository: CodewordRepository,
     contactsRepository: ContactsRepository,
     voiceProfiles: VoiceProfileRepository,
+    activityRepository: ActivityRepository,
     permissions: PermissionProbe,
     angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator? = null,
     onOpenSession: (String) -> Unit,
@@ -120,6 +125,11 @@ fun HomeRoute(
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val voiceProfile by voiceProfiles.observe()
         .collectAsStateWithLifecycle(initialValue = null)
+    // Real recordings, so Home shows nothing when nothing has been recorded.
+    val recentSessions by activityRepository.observeSessions(ActivityFilter.All)
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val trails by activityRepository.observeTrailPaths()
+        .collectAsStateWithLifecycle(initialValue = emptyMap())
 
     val setup = guardianSetup(
         hasWakeWord = wakeWord.isEnrolled,
@@ -154,6 +164,13 @@ fun HomeRoute(
                 viewModel.onAction(HomeAction.StartRecording(null))
             }
         },
+        onDuress = { tier ->
+            // Dispatch *and* record. The alert used to only flip in-memory state, so a
+            // duress trigger notified the circle with no audio, no transcript and no
+            // session to hand anyone afterwards — an alert with no evidence behind it.
+            handsFree.recordNow()
+            viewModel.onAction(HomeAction.DispatchAlert(tier))
+        },
         onStopRecording = {
             handsFree.stopRecording()
             // Stop *and* stand down, in that order. `StopRecording` alone leaves the
@@ -162,6 +179,8 @@ fun HomeRoute(
             viewModel.onAction(HomeAction.StopRecording)
             viewModel.onAction(HomeAction.DisarmGuardian)
         },
+        recentSessions = recentSessions,
+        trails = trails,
         setup = setup,
         onFixCapability = { capability ->
             when (capability) {
@@ -200,6 +219,9 @@ fun HomeScreen(
     onDisarm: () -> Unit = {},
     onRecordNow: () -> Unit = {},
     onStopRecording: () -> Unit = {},
+    onDuress: (CodewordTier) -> Unit = {},
+    recentSessions: List<MonitoredSession> = emptyList(),
+    trails: Map<String, List<TrailPoint>> = emptyMap(),
     setup: GuardianSetup = GuardianSetup(GuardianCapability.entries.toSet()),
     onFixCapability: (GuardianCapability) -> Unit = {},
     onFixBlocker: (ListeningRequirement) -> Unit = {},
@@ -220,6 +242,9 @@ fun HomeScreen(
             onDisarm = onDisarm,
             onRecordNow = onRecordNow,
             onStopRecording = onStopRecording,
+            onDuress = onDuress,
+            recentSessions = recentSessions,
+            trails = trails,
             setup = setup,
             onFixCapability = onFixCapability,
             onFixBlocker = onFixBlocker,
@@ -263,6 +288,9 @@ private fun ReadyState(
     onDisarm: () -> Unit,
     onRecordNow: () -> Unit,
     onStopRecording: () -> Unit,
+    onDuress: (CodewordTier) -> Unit,
+    recentSessions: List<MonitoredSession>,
+    trails: Map<String, List<TrailPoint>>,
     setup: GuardianSetup,
     onFixCapability: (GuardianCapability) -> Unit,
     onFixBlocker: (ListeningRequirement) -> Unit,
@@ -296,15 +324,32 @@ private fun ReadyState(
             )
         }
 
-        // --- Recording takes over at the top ---------------------------------------
+        AngelHeroCard(
+            mood = mood,
+            message = angelMessage(snapshot, mood),
+            badge = if (atHaven) "Standby" else snapshot.journey?.let { "Live" },
+            badgeIcon = if (atHaven) GuardianIcons.Moon else GuardianIcons.Waveform,
+        )
+
+        // --- Live recording, directly under Angel ------------------------------------
+        //
+        // Below the hero rather than displacing it. Recording is not an emergency, and a
+        // panel that took over the top of the screen implied it was; Angel and the safety
+        // score stay visible, and they are what actually say whether anything is wrong.
+        //
+        // The fallback covers the gap between capture starting and the repository
+        // publishing a session, so the card appears as the microphone opens rather than a
+        // beat later.
         val liveSession = snapshot.activeSession ?: if (isRecording) {
-            com.example.guardianangel.domain.model.RecordingSession(
+            RecordingSession(
                 id = "live-session",
                 startedAtEpochMillis = System.currentTimeMillis(),
                 triggeredBy = null,
                 transcriptPreview = emptyList(),
             )
-        } else null
+        } else {
+            null
+        }
 
         AnimatedVisibility(
             visible = isRecording && liveSession != null,
@@ -315,20 +360,10 @@ private fun ReadyState(
                 ActiveRecordingPanel(
                     session = session,
                     contactsNotifiedLabel = notifiedLabel(snapshot),
-                    onStop = {
-                        onAction(HomeAction.StopRecording)
-                        onDisarm()
-                    },
+                    onStop = onStopRecording,
                 )
             }
         }
-
-        AngelHeroCard(
-            mood = mood,
-            message = angelMessage(snapshot, mood),
-            badge = if (atHaven) "Standby" else snapshot.journey?.let { "Live" },
-            badgeIcon = if (atHaven) GuardianIcons.Moon else GuardianIcons.Waveform,
-        )
 
         // The safety score sits directly under Angel, before anything optional.
         //
@@ -364,24 +399,30 @@ private fun ReadyState(
         )
 
         if (atHaven) {
-            SanctuaryBody(snapshot, onAction, onPlanRoute, onRecordNow)
+            SanctuaryBody(snapshot, onPlanRoute, onRecordNow, onDuress)
         } else {
-            JourneyBody(snapshot, onAction, isRecording, onRecordNow)
+            JourneyBody(snapshot, onAction, isRecording, onRecordNow, onDuress)
         }
 
         GuardiansStrip(contacts = snapshot.contacts)
 
-        SectionHeader(title = "Recent activity", icon = GuardianIcons.Clock) {
-            Text(
-                text = "Yesterday",
-                style = GuardianTheme.type.labelSm,
-                color = GuardianTheme.materialColors.onSurfaceVariant,
-            )
-        }
-        // Capped at two on Home: the full log lives in the Activities tab, and a long
-        // list here would bury the controls that matter in the moment.
-        ActivitySamples.sessions.take(2).forEach { session ->
-            RecentActivityCard(session = session, onClick = { onOpenSession(session.id) })
+        // Shown only when there is something to show.
+        //
+        // This read from `ActivitySamples` — three invented incidents, including one with
+        // a fabricated transcript, on every account. A safety app that displays imaginary
+        // recordings teaches the user that its records cannot be trusted, which is the
+        // one thing it cannot afford.
+        if (recentSessions.isNotEmpty()) {
+            SectionHeader(title = "Recent activity", icon = GuardianIcons.Clock)
+            // Capped at two: the full log lives in the Activities tab, and a long list
+            // here would bury the controls that matter in the moment.
+            recentSessions.take(2).forEach { session ->
+                RecentActivityCard(
+                    session = session,
+                    onClick = { onOpenSession(session.id) },
+                    trailPoints = trails[session.id].orEmpty(),
+                )
+            }
         }
     }
 }
@@ -448,9 +489,9 @@ private fun AmberAlertBanner(
 @Composable
 private fun SanctuaryBody(
     snapshot: GuardianSnapshot,
-    onAction: (HomeAction) -> Unit,
     onPlanRoute: () -> Unit,
     onRecordNow: () -> Unit,
+    onDuress: (CodewordTier) -> Unit,
 ) {
     GuardianPrimaryButton(
         text = "Start guarded walk",
@@ -460,14 +501,26 @@ private fun SanctuaryBody(
         modifier = Modifier.fillMaxWidth(),
     )
 
-    QuickActionRow(
-        leftLabel = "Record quietly",
-        leftIcon = GuardianIcons.Mic,
-        onLeft = onRecordNow,
-        rightLabel = "Hold SOS",
-        rightIcon = GuardianIcons.CrisisAlert,
-        onRight = { onAction(HomeAction.DispatchAlert(CodewordTier.Danger)) },
-        rightIsDuress = true,
+    GuardianOutlinedButton(
+        text = "Record quietly",
+        onClick = onRecordNow,
+        leadingIcon = GuardianIcons.Mic,
+        modifier = Modifier.fillMaxWidth(),
+    )
+
+    // The real duress control, not the old "Hold SOS" quick action.
+    //
+    // That button was labelled "Hold" and fired on a single tap, with no hold, no
+    // confirmation and no undo — one stray touch on the home screen dispatched a Danger
+    // alert to the user's circle. This is the same three-second-hold card the journey
+    // view uses, so there is one SOS in the app and it behaves the same everywhere.
+    DuressTriggerCard(
+        onFire = onDuress,
+        notifyingLabel = snapshot.contacts
+            .takeIf { it.isNotEmpty() }
+            ?.joinToString(" and ") { it.name.substringBefore(' ') }
+            ?.let { "Sends a silent alert with your live location to $it." }
+            ?: "Add a guardian first — there is nobody to alert yet.",
     )
 }
 
@@ -478,10 +531,11 @@ private fun JourneyBody(
     onAction: (HomeAction) -> Unit,
     isRecording: Boolean,
     onRecordNow: () -> Unit,
+    onDuress: (CodewordTier) -> Unit,
 ) {
     if (!isRecording) {
         DuressTriggerCard(
-            onFire = { tier -> onAction(HomeAction.DispatchAlert(tier)) },
+            onFire = onDuress,
             notifyingLabel = snapshot.contacts
                 .takeIf { it.isNotEmpty() }
                 ?.joinToString(" and ") { it.name.substringBefore(' ') }
@@ -544,18 +598,17 @@ private fun angelMessage(snapshot: GuardianSnapshot, mood: AngelMood): String {
     val journey = snapshot.journey
     return when (mood) {
         AngelMood.Critical ->
-            "I've got you, $name. Your circle has been told and I'm sharing where you are."
+            "Angel is alert. Help is ready. I'm sharing your location with your trusted circle."
         AngelMood.Warning ->
-            "This stretch is darker than I'd like. I'm listening closely — say the word " +
-                "and I'll call your circle."
+            "Angel noticed a higher-exposure area ahead. I'm listening closely — say the word and I'll call your circle."
         AngelMood.Cautious ->
             journey?.let {
-                "Walking with you along ${it.corridorLabel}. Lighting is " +
-                    "${it.illuminationPercent}% and your circle knows where you are."
-            } ?: "I'm listening for your codewords."
-        AngelMood.Sanctuary, AngelMood.Resting ->
-            "Safe and sound at ${snapshot.safeHavenLabel ?: "home"}, $name. " +
-                "I'm resting my listening ear, ready whenever you need me."
+                "Walking with you along ${it.corridorLabel}. Lighting is ${it.illuminationPercent}%."
+            } ?: "You're out. Angel is watching with you."
+        AngelMood.Sanctuary ->
+            "You're home. Angel is keeping watch quietly."
+        AngelMood.Resting ->
+            "Angel is on standby. Arm before you set off for hands-free watching."
     }
 }
 

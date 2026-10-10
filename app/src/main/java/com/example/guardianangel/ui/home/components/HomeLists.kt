@@ -24,10 +24,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.guardianangel.domain.model.ContactPresence
 import com.example.guardianangel.domain.model.EmergencyContact
+import com.example.guardianangel.domain.model.TrailPoint
+import com.example.guardianangel.domain.trail.TrailBuilder
 import com.example.guardianangel.domain.model.MonitoredSession
 import com.example.guardianangel.domain.model.SessionKind
 import com.example.guardianangel.ui.components.GuardianCard
 import com.example.guardianangel.ui.icons.GuardianIcons
+import com.example.guardianangel.ui.trail.TrailPreview
 import com.example.guardianangel.ui.theme.GuardianTheme
 import com.example.guardianangel.ui.theme.SafetyLevel
 import com.example.guardianangel.ui.theme.safetyColorsFor
@@ -111,6 +114,8 @@ fun RecentActivityCard(
     session: MonitoredSession,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Breadcrumbs for this session. Empty hides the preview rather than drawing a box. */
+    trailPoints: List<TrailPoint> = emptyList(),
 ) {
     val level = when (session.kind) {
         SessionKind.Incident -> SafetyLevel.High
@@ -151,6 +156,18 @@ fun RecentActivityCard(
             style = GuardianTheme.type.labelSm,
             color = GuardianTheme.materialColors.onSurfaceVariant,
         )
+
+        // The path, when there is one. Tapping it opens the session, same as the card —
+        // a preview that looked tappable but did something different would be worse
+        // than one that is not tappable at all.
+        if (trailPoints.isNotEmpty()) {
+            Spacer(Modifier.height(GuardianTheme.spacing.sm))
+            TrailPreview(
+                trail = TrailBuilder.build(session.id, trailPoints, session.entries),
+                onClick = onClick,
+                height = 118.dp,
+            )
+        }
 
         Spacer(Modifier.height(GuardianTheme.spacing.sm))
         Box(

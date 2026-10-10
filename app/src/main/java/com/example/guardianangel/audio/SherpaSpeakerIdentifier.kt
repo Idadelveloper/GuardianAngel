@@ -138,6 +138,44 @@ class SherpaSpeakerIdentifier(
         return "spk${sessionSpeakers.lastIndex}"
     }
 
+    /**
+     * Who spoke this segment: a session-stable cluster label, and whether it was her.
+     *
+     * One embedding answers both questions, which is why they are returned together —
+     * computing them separately embedded the same audio twice.
+     *
+     * `isEnrolledUser` is null when there is no voiceprint to compare against or the
+     * segment was too short to embed. Null is not "someone else": a codeword from an
+     * unverifiable voice is handled differently from one that is positively a stranger.
+     */
+    fun attribute(samples: FloatArray): SpeakerAttribution? {
+        val embedding = embedSpeech(samples) ?: return null
+
+        var bestIndex = -1
+        var bestScore = SAME_SPEAKER
+        sessionSpeakers.forEachIndexed { index, known ->
+            val score = cosineSimilarity(embedding, known)
+            if (score >= bestScore) {
+                bestScore = score
+                bestIndex = index
+            }
+        }
+        val tag = if (bestIndex >= 0) {
+            "spk$bestIndex"
+        } else {
+            sessionSpeakers += embedding
+            "spk${sessionSpeakers.lastIndex}"
+        }
+
+        val reference = enrolledVoiceprint
+        return SpeakerAttribution(
+            tag = tag,
+            isEnrolledUser = reference?.let {
+                cosineSimilarity(embedding, it) >= SAME_SPEAKER
+            },
+        )
+    }
+
     /** True when a voice other than the enrolled user has been heard this session. */
     fun hasUnknownVoice(): Boolean {
         val reference = enrolledVoiceprint ?: return sessionSpeakers.size > 1

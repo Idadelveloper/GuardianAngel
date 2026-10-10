@@ -10,6 +10,9 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -17,7 +20,10 @@ import androidx.core.app.ServiceCompat
 import com.example.guardianangel.MainActivity
 import com.example.guardianangel.R
 import com.example.guardianangel.appContainer
+import com.example.guardianangel.di.AppContainer
 import com.example.guardianangel.domain.model.CodewordTier
+import com.example.guardianangel.domain.repository.SessionRecorder
+import com.example.guardianangel.domain.codeword.CodewordGate
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -76,6 +82,24 @@ class GuardianListeningService : Service() {
      * intent carries the intent, and recording begins as soon as the models are up.
      */
     private var startRecordingWhenReady = false
+
+    /**
+     * Decides whether a spoken codeword acts. See [CodewordGate] for the rules.
+     *
+     * Lives on the service rather than inside the audio session because its state has to
+     * outlive a single phase change: a Danger word held back at the end of one recording
+     * must still be cancellable.
+     */
+    private val codewordGate = CodewordGate()
+
+    /** Writes the live session to storage. Resolved lazily: the container outlives us. */
+    private val recorder: SessionRecorder get() = appContainer.sessionRecorder
+
+    /** Wall-clock of the last thing worth noticing, for the inactivity timeout. */
+    @Volatile
+    private var lastSignificantEvent = 0L
+
+    private var watchdog: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -175,6 +199,15 @@ class GuardianListeningService : Service() {
                     tracker.observeLocation().collect { point ->
                         val address = tracker.reverseGeocode(point)
                         orchestrator.onLocationUpdate(point, address)
+                        // Breadcrumbed into the session so the exported record can say
+                        // where each part of the conversation happened.
+                        recorder.addLocation(
+                            latitude = point.latitude,
+                            longitude = point.longitude,
+                            atMillis = System.currentTimeMillis(),
+                            label = address,
+                            safetyScore = orchestrator.state.value.factors.compositeSafetyScore,
+                        )
                     }
                 }
             }
@@ -198,19 +231,28 @@ class GuardianListeningService : Service() {
                         isLiveScanning = angelState.isHyperAware,
                     )
                     guardian.updateSafetyScore(safetyScoreModel)
+                    // Kept on the session so a finished recording can be ranked by how
+                    // bad it got, which is what the Activity list and insights sort on.
+                    recorder.noteSafetyScore(factors.compositeSafetyScore)
                 }
             }
 
             val audio = GuardianAudioSession(
                 context = applicationContext,
                 scope = scope,
-                onWakeWord = {
+                onWakeWord = { keyword ->
                     scope.launch {
                         // A wake word only ever *starts* a recording. What happens next
                         // is decided by the codewords said during it, or by the
                         // reasoning tier — never by the wake word itself.
+                        //
+                        // Identical to what the record button does, which is the point:
+                        // saying the phrase and tapping the button have to produce the
+                        // same session, written the same way.
                         listening.onWakeWordDetected()
+                        recorder.begin(trigger = null, triggerLabel = keyword)
                         guardian.startRecording(trigger = null)
+                        noteActivity()
                         updateNotification(recording = true)
                     }
                 },
@@ -223,21 +265,56 @@ class GuardianListeningService : Service() {
                         guardian.dispatchAlert(CodewordTier.Danger)
                     }
                 },
-                onTranscriptDecoded = { chunk, isUser, peakDb ->
+                onTranscriptDecoded = { chunk, _, peakDb ->
                     scope.launch {
-                        val codewords = runCatching { codewordsRepo.observeCodewords().first() }.getOrDefault(emptyList())
+                        noteActivity()
+                        val codewords = runCatching {
+                            codewordsRepo.observeCodewords().first()
+                        }.getOrDefault(emptyList())
+
+                        // The orchestrator still scores the situation; it no longer fires
+                        // codeword actions. Those run through the gate below, which knows
+                        // about repeats, speakers and accidents.
                         orchestrator.onTranscriptReceived(chunk, guardian, codewords)
-                        val line = com.example.guardianangel.domain.model.TranscriptLine(
-                            speakerLabel = if (isUser) "You" else "Unfamiliar Speaker",
-                            text = chunk.text,
-                            atEpochMillis = System.currentTimeMillis(),
-                            isFlagged = orchestrator.state.value.factors.verbalScore < 70,
+
+                        val flagged = orchestrator.state.value.factors.verbalScore < FLAG_SCORE
+                        persistLine(chunk, peakDb, flagged)
+
+                        guardian.updateTranscript(
+                            com.example.guardianangel.domain.model.TranscriptLine(
+                                speakerLabel = speakerLabel(chunk.isEnrolledUser),
+                                text = chunk.text,
+                                atEpochMillis = System.currentTimeMillis(),
+                                isFlagged = flagged,
+                            )
                         )
-                        guardian.updateTranscript(line)
+
+                        handleCodeword(
+                            decision = codewordGate.evaluate(
+                                text = chunk.text,
+                                isEnrolledUser = chunk.isEnrolledUser,
+                                codewords = codewords,
+                            ),
+                            guardian = guardian,
+                        )
                     }
                 },
                 onEventsDetected = { events, peakDb ->
                     orchestrator.onAudioEvents(events, peakDb)
+                    scope.launch {
+                        // A scream or breaking glass is activity, so the inactivity
+                        // timeout must not fire during an incident that has no speech.
+                        if (events.any { it.isDangerSignal }) noteActivity()
+                        events.forEach { event ->
+                            recorder.addAudioEvent(
+                                label = event.label,
+                                decibels = peakDb,
+                                confidence = event.confidence,
+                                atMillis = System.currentTimeMillis(),
+                                isDanger = event.isDangerSignal,
+                            )
+                        }
+                    }
                 },
             )
             session = audio
@@ -260,11 +337,152 @@ class GuardianListeningService : Service() {
             }
 
             audio.start()
+            startWatchdog(guardian)
             if (startRecordingWhenReady) {
                 startRecordingWhenReady = false
                 audio.forceRecording(MANUAL_TRIGGER)
+                recorder.begin(trigger = null, triggerLabel = MANUAL_TRIGGER)
                 guardian.startRecording(trigger = null)
                 updateNotification(recording = true)
+            }
+        }
+    }
+
+    /** Marks activity, which keeps the inactivity timeout from firing. */
+    private fun noteActivity() {
+        lastSignificantEvent = System.currentTimeMillis()
+    }
+
+    private fun speakerLabel(isEnrolledUser: Boolean?): String = when (isEnrolledUser) {
+        true -> "You"
+        false -> "Unfamiliar voice"
+        // Honest about not knowing. Calling an unverifiable voice "unfamiliar" would put
+        // a stranger's label on the user's own words whenever enrolment was skipped.
+        null -> "Speaker"
+    }
+
+    private suspend fun persistLine(
+        chunk: com.example.guardianangel.audio.TranscriptChunk,
+        peakDb: Int?,
+        flagged: Boolean,
+    ) {
+        recorder.addTranscript(
+            com.example.guardianangel.domain.model.DiarizedEntry(
+                id = chunk.speakerTag ?: "line",
+                sessionId = recorder.activeSessionId.orEmpty(),
+                atEpochMillis = System.currentTimeMillis(),
+                speakerKind = when (chunk.isEnrolledUser) {
+                    true -> com.example.guardianangel.domain.model.SpeakerKind.You
+                    false -> com.example.guardianangel.domain.model.SpeakerKind.Unknown
+                    null -> com.example.guardianangel.domain.model.SpeakerKind.KnownPattern
+                },
+                speakerLabel = speakerLabel(chunk.isEnrolledUser),
+                speakerQualifier = when (chunk.isEnrolledUser) {
+                    true -> "Voiceprint verified"
+                    false -> "Not your voiceprint"
+                    null -> null
+                },
+                text = chunk.text,
+                decibels = peakDb,
+                isFlagged = flagged,
+            )
+        )
+    }
+
+    /**
+     * Acts on the gate's verdict.
+     *
+     * Note what is *not* here: no branch dispatches an alert straight from a transcript
+     * match. Danger and Emergency are held by the gate and dispatched by [watchdog] once
+     * their grace period passes, so an accident can be taken back.
+     */
+    private suspend fun handleCodeword(
+        decision: CodewordGate.Decision,
+        guardian: com.example.guardianangel.domain.repository.GuardianRepository,
+    ) {
+        when (decision) {
+            CodewordGate.Decision.None -> Unit
+
+            is CodewordGate.Decision.Act -> {
+                recorder.noteCodeword(decision.tier, decision.phrase, wasUserVoice = true)
+                when (decision.tier) {
+                    CodewordTier.Safe -> {
+                        // Said with nothing pending: she is telling her circle she is
+                        // fine, which ends the session rather than starting anything.
+                        guardian.dispatchAlert(CodewordTier.Safe)
+                        stopListening()
+                    }
+                    CodewordTier.Caution -> Log.i(TAG, "Caution codeword: recording continues")
+                    else -> guardian.dispatchAlert(decision.tier)
+                }
+            }
+
+            is CodewordGate.Decision.Holding -> {
+                recorder.noteCodeword(
+                    decision.pending.tier,
+                    decision.pending.phrase,
+                    wasUserVoice = decision.pending.saidByEnrolledUser,
+                )
+                Log.i(
+                    TAG,
+                    "${decision.pending.tier} held for " +
+                        "${decision.pending.dispatchAtMillis - System.currentTimeMillis()}ms",
+                )
+                updateNotification(recording = true)
+            }
+
+            is CodewordGate.Decision.Cancelled -> {
+                Log.i(TAG, "${decision.tier} cancelled by the safe word")
+                guardian.dispatchAlert(CodewordTier.Safe)
+            }
+
+            is CodewordGate.Decision.Withheld -> {
+                // Logged into the session, not acted on. Silence here would read as a
+                // bug to the user and as missing evidence to anyone reading it later.
+                Log.i(TAG, "${decision.tier} withheld: ${decision.reason}")
+                recorder.noteCodeword(
+                    decision.tier,
+                    decision.phrase,
+                    wasUserVoice = false,
+                )
+            }
+        }
+    }
+
+    /**
+     * Dispatches held-back codewords, and stops a session that has gone quiet.
+     *
+     * One loop rather than two timers: both are "check the clock every second", and a
+     * single job is one thing to cancel on teardown.
+     */
+    private fun startWatchdog(
+        guardian: com.example.guardianangel.domain.repository.GuardianRepository,
+    ) {
+        watchdog?.cancel()
+        noteActivity()
+        watchdog = scope.launch {
+            while (isActive) {
+                delay(WATCHDOG_TICK_MILLIS)
+
+                codewordGate.dueForDispatch()?.let { pending ->
+                    codewordGate.consumePending()
+                    Log.i(TAG, "Dispatching held ${pending.tier}")
+                    guardian.dispatchAlert(pending.tier)
+                    recorder.noteGuardiansNotified(listOf("circle"))
+                    noteActivity()
+                }
+
+                val idleFor = System.currentTimeMillis() - lastSignificantEvent
+                val recording = session?.state?.value?.phase == SessionPhase.Recording
+                if (recording && idleFor >= IDLE_TIMEOUT_MILLIS) {
+                    // A recording left running all night is a battery drain and a
+                    // privacy problem, and the user who forgot it is the one least
+                    // likely to notice. Nothing worth keeping has happened for half an
+                    // hour, so stand down rather than keep the microphone open.
+                    Log.i(TAG, "No activity for ${idleFor / 60_000} min; standing down")
+                    stopListening()
+                    return@launch
+                }
             }
         }
     }
@@ -291,7 +509,16 @@ class GuardianListeningService : Service() {
         val closing = session
         session = null
         _state.value = false
+        watchdog?.cancel()
+        watchdog = null
         runCatching { appContainer.angelOrchestrator.setHyperAware(false) }
+
+        // Close the session before the models go, so the summary reflects everything
+        // captured. Runs on the teardown scope because `scope` is about to be cancelled.
+        teardownScope.launch {
+            runCatching { recorder.finish() }
+            codewordGate.reset()
+        }
         // The notification and the service go immediately — the user asked to stand down
         // and should see that happen. Freeing the models trails behind, in order.
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -383,6 +610,20 @@ class GuardianListeningService : Service() {
         private const val CHANNEL_ID = "guardian_listening"
         private const val NOTIFICATION_ID = 1001
         private const val ACTION_STOP = "com.example.guardianangel.STOP_LISTENING"
+
+        /** Verbal-risk score below which a line is marked as a danger signal. */
+        private const val FLAG_SCORE = 70
+
+        private const val WATCHDOG_TICK_MILLIS = 1_000L
+
+        /**
+         * How long a recording runs with nothing happening before standing down.
+         *
+         * Thirty minutes: long enough that a quiet walk is not cut short, short enough
+         * that a recording forgotten in a bag does not run until the battery dies. Speech
+         * and danger sounds both reset it, so an incident cannot time out mid-way.
+         */
+        private const val IDLE_TIMEOUT_MILLIS = 30 * 60 * 1000L
         private const val ACTION_RECORD = "com.example.guardianangel.START_RECORDING"
 
         /** Marks a session the user started by hand rather than by speaking. */

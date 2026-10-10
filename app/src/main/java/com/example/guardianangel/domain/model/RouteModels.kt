@@ -63,6 +63,7 @@ data class SafeRoute(
     val pathNormalised: List<Pair<Float, Float>> = emptyList(),
     /** True for the corridor Angel recommends. */
     val isRecommended: Boolean = false,
+    val assessment: RouteAssessment? = null,
 )
 
 /** The map tab's state. */

@@ -65,6 +65,16 @@ class SherpaTranscriber(
      */
     private val nativeLock = Any()
 
+    /**
+     * Resolves who spoke a segment. Set by the owner of the speaker model.
+     *
+     * A hook rather than a dependency so the transcriber stays usable on its own, and so
+     * one `SherpaSpeakerIdentifier` can be shared with the wake-word gate and the
+     * diarizer instead of each tier loading its own 28 MB copy.
+     */
+    @Volatile
+    var attributeSpeaker: ((FloatArray) -> SpeakerAttribution?)? = null
+
     /** Running sample offset, so chunks carry real timestamps rather than indices. */
     private var samplesConsumed: Long = 0
 
@@ -172,6 +182,12 @@ class SherpaTranscriber(
             if (text.isEmpty()) return
             val startMillis = startSample * 1000 / SAMPLE_RATE
             val endMillis = startMillis + samples.size * 1000L / SAMPLE_RATE
+
+            // Attributed here because this is the only place the segment's audio and its
+            // text exist together. Resolving it later would mean either keeping the audio
+            // alive or guessing from session-level state.
+            val speaker = runCatching { attributeSpeaker?.invoke(samples) }.getOrNull()
+
             _transcript.tryEmit(
                 TranscriptChunk(
                     text = text,
@@ -179,6 +195,8 @@ class SherpaTranscriber(
                     isFinal = true,
                     startMillis = startMillis,
                     endMillis = endMillis,
+                    speakerTag = speaker?.tag,
+                    isEnrolledUser = speaker?.isEnrolledUser,
                 )
             )
         } catch (e: Exception) {

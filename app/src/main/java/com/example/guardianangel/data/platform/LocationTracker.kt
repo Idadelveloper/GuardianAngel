@@ -130,6 +130,51 @@ class LocationTracker(
         }
     }
 
+    @SuppressLint("MissingPermission")
+    fun observeUserLocation(): Flow<com.example.guardianangel.domain.model.UserLocationSnapshot> = callbackFlow {
+        if (!hasLocationPermission()) {
+            close()
+            return@callbackFlow
+        }
+
+        val request = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 4_000L)
+            .setMinUpdateIntervalMillis(1_500L)
+            .setMinUpdateDistanceMeters(3f)
+            .build()
+
+        val callback = object : LocationCallback() {
+            override fun onLocationResult(result: LocationResult) {
+                val loc = result.lastLocation ?: return
+                val point = GeoPoint(loc.latitude, loc.longitude)
+                recordBreadcrumb(point, loc.accuracy)
+                val bearing = if (loc.hasBearing()) loc.bearing else null
+                val bearingAcc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && loc.hasBearingAccuracy()) loc.bearingAccuracyDegrees else null
+                val speed = if (loc.hasSpeed()) loc.speed else null
+                val accuracy = if (loc.hasAccuracy()) loc.accuracy else null
+                val snapshot = com.example.guardianangel.domain.model.UserLocationSnapshot(
+                    point = point,
+                    accuracyMeters = accuracy,
+                    bearingDegrees = bearing,
+                    bearingAccuracyDegrees = bearingAcc,
+                    speedMps = speed,
+                    timestampMillis = if (loc.time > 0) loc.time else System.currentTimeMillis(),
+                )
+                trySend(snapshot)
+            }
+        }
+
+        try {
+            fusedClient.requestLocationUpdates(request, callback, Looper.getMainLooper())
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed requesting location updates", e)
+            close(e)
+        }
+
+        awaitClose {
+            fusedClient.removeLocationUpdates(callback)
+        }
+    }
+
     private fun recordBreadcrumb(point: GeoPoint, accuracy: Float) {
         val entry = LocationBreadcrumb(
             point = point,

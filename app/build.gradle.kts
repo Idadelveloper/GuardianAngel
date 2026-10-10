@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -8,6 +10,7 @@ plugins {
     // here and applying it below only when the file exists keeps the app fully
     // functional offline, and lights Firebase up the moment a config is dropped in.
     alias(libs.plugins.google.services) apply false
+    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
 }
 
 if (file("google-services.json").exists()) {
@@ -20,12 +23,26 @@ android {
         version = release(37)
     }
 
+    val secretsProps = Properties()
+    val secFile = rootProject.file("secrets.properties")
+    val locFile = rootProject.file("local.properties")
+    if (secFile.exists()) {
+        secFile.inputStream().use { secretsProps.load(it) }
+    } else if (locFile.exists()) {
+        locFile.inputStream().use { secretsProps.load(it) }
+    }
+    val mapsApiKey = secretsProps.getProperty("MAPS_API_KEY")
+        ?: secretsProps.getProperty("GOOGLE_MAPS_API_KEY")
+        ?: "AIzaSyPlaceholderGuardianAngelKey"
+
     defaultConfig {
         applicationId = "com.example.guardianangel"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
+
+        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -136,4 +153,7 @@ dependencies {
 
     // Google ADK
     implementation(libs.google.adk.kotlin.core)
+
+    // Places and Maps SDKs
+    implementation(libs.places)
 }

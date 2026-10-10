@@ -18,6 +18,7 @@ import com.example.guardianangel.data.local.RoomContactsRepository
 import com.example.guardianangel.data.platform.AndroidPermissionProbe
 import com.example.guardianangel.data.local.RoomListeningRepository
 import com.example.guardianangel.domain.repository.PermissionProbe
+import com.example.guardianangel.domain.repository.SessionRecorder
 import com.example.guardianangel.domain.repository.VoiceProfileRepository
 import com.example.guardianangel.data.local.RoomVoiceProfileStore
 import com.example.guardianangel.data.local.RoomWakeWordStore
@@ -136,10 +137,68 @@ class DatabaseAppContainer(
     override val contactsRepository: ContactsRepository =
         RoomContactsRepository(database.guardianDao(), currentUser)
 
-    // Still derived rather than stored: these need sensors and a routing service.
+    override val safeLocationRepository: com.example.guardianangel.domain.repository.SafeLocationRepository =
+        com.example.guardianangel.data.local.RoomSafeLocationRepository(database.safePlaceDao(), currentUser)
+
+    override val berkeleySafetyDataSource = com.example.guardianangel.data.berkeley.BerkeleySafetyDataSource(context)
+    override val weatherProvider: com.example.guardianangel.data.weather.WeatherProvider =
+        com.example.guardianangel.data.weather.NationalWeatherServiceApiProvider()
+
+    private fun getMapsApiKey(): String {
+        return try {
+            val appInfo = context.packageManager.getApplicationInfo(
+                context.packageName,
+                android.content.pm.PackageManager.GET_META_DATA
+            )
+            appInfo.metaData?.getString("com.google.android.geo.API_KEY") ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    override val placesSearchProvider: com.example.guardianangel.data.places.PlacesSearchProvider =
+        com.example.guardianangel.data.places.GooglePlacesSearchProvider(apiKeyProvider = { getMapsApiKey() })
+
+    private val rawRouteProvider = com.example.guardianangel.data.routes.GoogleRoutesApiProvider(
+        apiKeyProvider = { getMapsApiKey() },
+        fallbackProvider = com.example.guardianangel.data.routes.FakeRouteProvider(),
+    )
+    private val deterministicRanker = com.example.guardianangel.data.routes.DeterministicRouteRanker(berkeleySafetyDataSource)
+    private val routeCoordinator = com.example.guardianangel.agent.berkeley.BerkeleyRouteCoordinator(
+        routeProvider = rawRouteProvider,
+        safetyDataSource = berkeleySafetyDataSource,
+        weatherProvider = weatherProvider,
+        ranker = deterministicRanker,
+    )
+
+    // Derived from live Berkeley safety data & routing engines
     override val guardianRepository: GuardianRepository = FakeGuardianRepository()
-    override val routeRepository: RouteRepository = FakeRouteRepository()
-    override val activityRepository: ActivityRepository = FakeActivityRepository()
+    override val routeRepository: RouteRepository = com.example.guardianangel.data.routes.BerkeleyRouteRepository(
+        coordinator = routeCoordinator,
+        safetyDataSource = berkeleySafetyDataSource,
+        safeLocationRepository = safeLocationRepository,
+        scope = scope,
+    )
+    /** Writes the live recording. Shared with the listening service via this container. */
+    override val sessionRecorder: SessionRecorder =
+        com.example.guardianangel.data.local.RoomSessionRecorder(
+            dao = database.sessionDao(),
+            currentUser = currentUser,
+        )
+
+    /**
+     * Real sessions, read back from Room.
+     *
+     * Replaces `FakeActivityRepository`, which served three invented incidents to every
+     * account. An app that shows imaginary evidence teaches the user its records cannot
+     * be trusted, which for this app is the whole product.
+     */
+    override val activityRepository: ActivityRepository =
+        com.example.guardianangel.data.local.RoomActivityRepository(
+            dao = database.sessionDao(),
+            currentUser = currentUser,
+            exporter = com.example.guardianangel.data.local.FileTranscriptExporter(context),
+        )
 
     override val crimeDataService = com.example.guardianangel.data.crime.CrimeDataService()
     override val locationTracker = com.example.guardianangel.data.platform.LocationTracker(context)

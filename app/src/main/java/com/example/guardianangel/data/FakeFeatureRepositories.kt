@@ -186,6 +186,23 @@ class FakeActivityRepository : ActivityRepository {
     override fun observeAnalytics(range: AnalyticsRange): Flow<MovementAnalytics> =
         MutableStateFlow(ActivitySamples.analytics(range)).asStateFlow()
 
+    /**
+     * A short invented walk, so previews have a shape to draw.
+     *
+     * Sample data for `@Preview` only. The Room implementation derives real trails; this
+     * exists so a designer can see the component without recording anything.
+     */
+    override fun observeTrail(sessionId: String) = kotlinx.coroutines.flow.flowOf(
+        com.example.guardianangel.domain.trail.TrailBuilder.build(
+            sessionId = sessionId,
+            points = SAMPLE_PATH,
+            entries = emptyList(),
+        )
+    )
+
+    override fun observeTrailPaths() =
+        state.map { sessions -> sessions.associate { it.id to SAMPLE_PATH } }
+
     override suspend fun exportSession(sessionId: String): String {
         delay(800)
         return "guardian-angel-$sessionId.pdf"
@@ -193,6 +210,19 @@ class FakeActivityRepository : ActivityRepository {
 
     override suspend fun deleteSession(sessionId: String) =
         state.update { list -> list.filterNot { it.id == sessionId } }
+}
+
+/** A short walk down a street, used only by previews. */
+private val SAMPLE_PATH = listOf(
+    0 to 92, 20 to 88, 40 to 74, 60 to 52, 80 to 58, 100 to 71,
+).mapIndexed { index, (seconds, score) ->
+    com.example.guardianangel.domain.model.TrailPoint(
+        latitude = 37.7749 + index * 0.0012,
+        longitude = -122.4194 + index * 0.0008,
+        atEpochMillis = seconds * 1000L,
+        safetyScore = score,
+        placeLabel = "Market St",
+    )
 }
 
 class FakeRouteRepository(

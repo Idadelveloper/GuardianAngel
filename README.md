@@ -16,9 +16,12 @@ No fumbling for a phone, no obvious panic button, no sound.
 > transcribed, tagged and diarized locally. Storage and accounts are real (Room, twelve
 > tables, encrypted secrets).
 >
-> Still outstanding: tier-3 LLM reasoning for ambiguous situations, Room-backed session
-> history, a real map and live location, and threshold tuning against real speech — which
-> only testing in real rooms can settle. See [Roadmap](#roadmap).
+> The **Berkeley safest-route prototype** is now integrated: a real Google Map Compose screen,
+> live GPS location tracking with Angel mascot marker and floating status bubble, Places
+> Autocomplete destination search, Home and Safe Location configuration with geofence hysteresis
+> and Sanctuary semantics (100% score at Home), deterministic multi-factor route scoring
+> over official Berkeley BPD/UCPD spatial cells and NWS weather, and privacy-preserving markers.
+> See [Berkeley Maps Setup](docs/BERKELEY_MAPS_SETUP.md) and [Roadmap](#roadmap).
 
 ---
 
@@ -249,7 +252,15 @@ its absence is most obvious, so it is where the offer belongs.
 ### Activity
 
 A log of monitored sessions and a movement-intelligence rollup behind one segmented
-control. Tapping a session opens the full diarized timeline — who said what when, which
+control. Each recorded session carries a **breadcrumb preview** — the path walked, drawn
+from the location points stored during the recording, with chips for distance and how
+many moments were flagged. Opening one shows the full route with a pin at every flagged
+moment: a codeword acted on, a sound the tagger caught, an unfamiliar voice, a sentence
+the reasoning tier flagged, or a sharp fall in the safety score. Tapping a pin says what
+happened there, quoting what was captured rather than paraphrasing it.
+
+The pins are worked out when the session is read, not when it is recorded, so a walk
+logged last month benefits from any later improvement to what counts as notable. Tapping a session opens the full diarized timeline — who said what when, which
 sounds the acoustic model flagged, and what Angel did about it.
 
 The design brief had the log and the analytics as separate screens. Folding them into one
@@ -608,11 +619,14 @@ many thin pointers.
 - [ ] SQLCipher for the whole database, not just the credential columns
 - [ ] Transcript export, annotation and deletion
 
-### Still to come
-
-- [x] Google Maps and a real device location source behind the Map tab
-- [ ] **A real Maps API key.** The manifest ships a placeholder, so tiles do not load yet.
-- [ ] Real safety-score model over public crime data
+### Route & Map Experience
+- [x] Real Google Maps Compose screen with fused location updates, follow-mode, and recenter
+- [x] Angel mascot as live user marker with mood transitions and floating text status bubble
+- [x] Destination search via Places Autocomplete (New) with Berkeley 15km bias and offline landmark catalog
+- [x] Home & Safe Location configuration (persisted to Room, geofence hysteresis, 100% Sanctuary score)
+- [x] Deterministic walking route evaluator (safest, fastest, well-lit options; BPD & UCPD crime cells, NWS weather)
+- [x] Privacy-preserving map markers (150m cell clusters, 24/7 safe havens, route hazard warnings, legend)
+- [ ] User-supplied Maps API key for production deployment (documented in `docs/BERKELEY_MAPS_SETUP.md`)
 - [ ] Wearable companion
 
 ## Privacy

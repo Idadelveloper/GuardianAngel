@@ -115,9 +115,6 @@ class GuardianAudioSession(
     private var prerollWrite = 0
     private var prerollFilled = 0
 
-    /** Accumulates audio during recording so speakers can be labelled window by window. */
-    private val speakerWindow = FloatArray(SPEAKER_WINDOW_SAMPLES)
-    private var speakerFilled = 0
     private var taggerFilled = 0
 
     /**
@@ -140,6 +137,10 @@ class GuardianAudioSession(
         // The understanding tiers are optional: missing them degrades the recording to
         // audio-only rather than preventing hands-free activation altogether.
         transcriber.load()
+        // One speaker model serves the wake-word gate, diarization and per-line
+        // attribution. Loading a second 28 MB copy per tier would be the obvious
+        // alternative and the wrong one.
+        transcriber.attributeSpeaker = { samples -> speakers.attribute(samples) }
         tagger.load()
         val speakersReady = speakers.load()
         speakers.enrolledVoiceprint = voiceprint
@@ -294,14 +295,11 @@ class GuardianAudioSession(
                     taggerFilled = 0
                 }
 
-                speakerFilled = fillTaggerWindow(speakerWindow, speakerFilled, buffer)
-                if (speakerFilled >= speakerWindow.size) {
-                    // Feeds unknownVoicePresent and speakerCount, which the reasoning
-                    // tier weighs. Without this they were always "one known speaker",
-                    // however many people were talking.
-                    speakers.labelSpeaker(speakerWindow)
-                    speakerFilled = 0
-                }
+                // Speaker clustering happens per transcribed segment now, inside
+                // `attribute()`, which is aligned to actual speech rather than to a
+                // fixed grid. Feeding windows here as well clustered the same person
+                // repeatedly and inflated the "how many voices" signal the reasoning
+                // tier weighs.
             }
 
             SessionPhase.Idle -> Unit
@@ -380,7 +378,6 @@ class GuardianAudioSession(
         speakers.resetSession()
         prerollFilled = 0
         prerollWrite = 0
-        speakerFilled = 0
         _state.value = _state.value.copy(
             phase = SessionPhase.Recording,
             triggeredBy = trigger,
@@ -395,8 +392,11 @@ class GuardianAudioSession(
         _state.value = _state.value.copy(
             transcript = (_state.value.transcript + chunk).takeLast(TRANSCRIPT_WINDOW),
         )
-        val isVerifiedUser = !speakers.hasUnknownVoice()
-        onTranscriptDecoded?.invoke(chunk, isVerifiedUser, latestDecibels)
+        // Per chunk, from the audio that produced it. This used to pass
+        // `!speakers.hasUnknownVoice()`, a session-wide flag: once any stranger had
+        // spoken, every later line of *hers* was reported as not-her, and until then a
+        // stranger's words were reported as hers. Codeword actions hang off this.
+        onTranscriptDecoded?.invoke(chunk, chunk.isEnrolledUser == true, latestDecibels)
         reassess(peakDecibels = latestDecibels)
     }
 

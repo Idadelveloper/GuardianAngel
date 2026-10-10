@@ -99,7 +99,13 @@ fun HandsFreeCard(
                         status.blockedBy.any { it != ListeningRequirement.BatteryExemption } ->
                             "Needs a moment of setup"
                         !status.detectorReady -> "Unavailable in this build"
-                        else -> "Ready — not listening yet"
+                        // Says what is missing, not just that something is.
+                        //
+                        // "Ready — not listening yet" was accurate and read as
+                        // reassurance: a user who had set a wake word reasonably assumed
+                        // saying it would work, and nothing on the screen said that
+                        // Android will not let the app listen until she arms it.
+                        else -> "Your wake word won't work until you arm me"
                     },
                     style = GuardianTheme.type.labelSm,
                     color = GuardianTheme.materialColors.onSurfaceVariant,

@@ -32,6 +32,7 @@ import com.example.guardianangel.data.ActivitySamples
 import com.example.guardianangel.domain.model.ActivityFilter
 import com.example.guardianangel.domain.model.AnalyticsRange
 import com.example.guardianangel.domain.model.MonitoredSession
+import com.example.guardianangel.domain.model.TrailPoint
 import com.example.guardianangel.domain.model.MovementAnalytics
 import com.example.guardianangel.domain.repository.ActivityRepository
 import com.example.guardianangel.ui.components.GuardianTabScaffold
@@ -64,10 +65,14 @@ fun ActivitiesRoute(
         .collectAsStateWithLifecycle(initialValue = emptyList())
     val analytics by repository.observeAnalytics(range)
         .collectAsStateWithLifecycle(initialValue = ActivitySamples.analytics(range))
+    // One query for every row's path, rather than one per row.
+    val trails by repository.observeTrailPaths()
+        .collectAsStateWithLifecycle(initialValue = emptyMap())
 
     ActivitiesScreen(
         sessions = sessions,
         analytics = analytics,
+        trails = trails,
         filter = filter,
         range = range,
         onFilterChange = { filter = it },
@@ -81,6 +86,7 @@ fun ActivitiesRoute(
 fun ActivitiesScreen(
     sessions: List<MonitoredSession>,
     analytics: MovementAnalytics,
+    trails: Map<String, List<TrailPoint>>,
     filter: ActivityFilter,
     range: AnalyticsRange,
     onFilterChange: (ActivityFilter) -> Unit,
@@ -126,6 +132,7 @@ fun ActivitiesScreen(
                 when (target) {
                     ActivityView.Log -> LogView(
                         sessions = sessions,
+                        trails = trails,
                         filter = filter,
                         onFilterChange = onFilterChange,
                         onOpenSession = onOpenSession,
@@ -144,6 +151,7 @@ fun ActivitiesScreen(
 @Composable
 private fun LogView(
     sessions: List<MonitoredSession>,
+    trails: Map<String, List<TrailPoint>>,
     filter: ActivityFilter,
     onFilterChange: (ActivityFilter) -> Unit,
     onOpenSession: (String) -> Unit,
@@ -185,7 +193,11 @@ private fun LogView(
         )
     } else {
         sessions.forEach { session ->
-            RecentActivityCard(session = session, onClick = { onOpenSession(session.id) })
+            RecentActivityCard(
+                session = session,
+                onClick = { onOpenSession(session.id) },
+                trailPoints = trails[session.id].orEmpty(),
+            )
         }
     }
 }
@@ -267,6 +279,7 @@ private fun ActivitiesPreview() {
         ActivitiesScreen(
             sessions = ActivitySamples.sessions,
             analytics = ActivitySamples.analytics(AnalyticsRange.Week),
+            trails = emptyMap(),
             filter = ActivityFilter.All,
             range = AnalyticsRange.Week,
             onFilterChange = {}, onRangeChange = {}, onOpenSession = {},

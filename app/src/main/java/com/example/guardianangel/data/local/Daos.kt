@@ -199,6 +199,48 @@ interface SessionDao {
     @Query("SELECT * FROM sessions WHERE id = :id")
     fun observe(id: String): Flow<SessionEntity?>
 
+    /** One-shot read, for the recorder closing out a session it opened. */
+    @Query("SELECT * FROM sessions WHERE id = :id")
+    suspend fun find(id: String): SessionEntity?
+
+    /** Sessions in a window, for the analytics rollup. */
+    @Query("SELECT * FROM sessions WHERE userId = :userId AND startedAt >= :since")
+    suspend fun findSince(userId: String, since: Long): List<SessionEntity>
+
+    @Query(
+        "SELECT * FROM audio_events WHERE sessionId IN " +
+            "(SELECT id FROM sessions WHERE userId = :userId AND startedAt >= :since)"
+    )
+    suspend fun findEventsSince(userId: String, since: Long): List<AudioEventEntity>
+
+    @Query(
+        "SELECT * FROM transcript_entries WHERE sessionId IN " +
+            "(SELECT id FROM sessions WHERE userId = :userId AND startedAt >= :since)"
+    )
+    suspend fun findTranscriptSince(userId: String, since: Long): List<TranscriptEntryEntity>
+
+    @Query("SELECT * FROM transcript_entries WHERE sessionId = :sessionId ORDER BY atMillis")
+    suspend fun findTranscript(sessionId: String): List<TranscriptEntryEntity>
+
+    @Query("SELECT * FROM audio_events WHERE sessionId = :sessionId ORDER BY atMillis")
+    suspend fun findEvents(sessionId: String): List<AudioEventEntity>
+
+    @Query("SELECT * FROM location_points WHERE sessionId = :sessionId ORDER BY atMillis")
+    suspend fun findTrail(sessionId: String): List<LocationPointEntity>
+
+    /**
+     * Every breadcrumb for this user, in one read.
+     *
+     * The Activity list draws a path per row; querying per row would mean one round trip
+     * each. Grouped in memory afterwards, which is cheap — a point is five numbers.
+     */
+    @Query(
+        "SELECT * FROM location_points WHERE sessionId IN " +
+            "(SELECT id FROM sessions WHERE userId = :userId) ORDER BY atMillis"
+    )
+    fun observeAllTrails(userId: String): Flow<List<LocationPointEntity>>
+
+
     @Upsert
     suspend fun upsert(session: SessionEntity)
 

@@ -228,6 +228,7 @@ private fun NavGraphBuilder.mainGraph(
                 codewordRepository = container.codewordRepository,
                 contactsRepository = container.contactsRepository,
                 voiceProfiles = container.voiceProfileRepository,
+                activityRepository = container.activityRepository,
                 permissions = container.permissionProbe,
                 angelOrchestrator = container.angelOrchestrator,
                 onOpenSession = { navController.navigate(Routes.sessionDetail(it)) },
@@ -245,6 +246,10 @@ private fun NavGraphBuilder.mainGraph(
                 crimeDataService = container.crimeDataService,
                 locationTracker = container.locationTracker,
                 permissionProbe = container.permissionProbe,
+                safeLocationRepository = container.safeLocationRepository,
+                safetyDataSource = container.berkeleySafetyDataSource,
+                placesSearchProvider = container.placesSearchProvider,
+                weatherProvider = container.weatherProvider,
                 onJourneyStarted = { navController.navigateToTab(Routes.HOME) },
             )
         }

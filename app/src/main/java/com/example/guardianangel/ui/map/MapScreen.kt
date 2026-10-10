@@ -30,54 +30,73 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.guardianangel.data.RouteSamples
-import com.example.guardianangel.data.crime.CrimeDataService
-import com.example.guardianangel.data.crime.CrimeHazardPoi
-import com.example.guardianangel.data.crime.SafeHavenPoi
+import com.example.guardianangel.data.berkeley.BerkeleySafetyDataSource
+import com.example.guardianangel.data.places.PlacePrediction
+import com.example.guardianangel.data.places.PlacesSearchProvider
 import com.example.guardianangel.data.platform.LocationTracker
+import com.example.guardianangel.data.weather.WeatherProvider
+import com.example.guardianangel.domain.GuardianSafetyStateResolver
+import com.example.guardianangel.domain.model.CrimeCell
+import com.example.guardianangel.domain.model.DataConfidence
 import com.example.guardianangel.domain.model.Destination
 import com.example.guardianangel.domain.model.GeoPoint
 import com.example.guardianangel.domain.model.RoutePlan
 import com.example.guardianangel.domain.model.RoutePreference
+import com.example.guardianangel.domain.model.SafeHavenPoi
+import com.example.guardianangel.domain.model.SafeLocation
 import com.example.guardianangel.domain.model.SafeRoute
+import com.example.guardianangel.domain.model.UserLocationSnapshot
 import com.example.guardianangel.domain.repository.GuardianRepository
 import com.example.guardianangel.domain.repository.PermissionProbe
 import com.example.guardianangel.domain.repository.RouteRepository
+import com.example.guardianangel.domain.repository.SafeLocationRepository
 import com.example.guardianangel.ui.components.BottomBarClearance
 import com.example.guardianangel.ui.components.GuardianPrimaryButton
 import com.example.guardianangel.ui.home.components.TonalPill
 import com.example.guardianangel.ui.icons.GuardianIcons
-import com.example.guardianangel.ui.theme.GuardianAngelTheme
+import com.example.guardianangel.ui.map.components.AngelStatusBubble
+import com.example.guardianangel.ui.map.components.HomeConfigDialog
+import com.example.guardianangel.ui.map.components.MapLegendAndFiltersDialog
+import com.example.guardianangel.ui.map.components.MarkerDetailSheet
+import com.example.guardianangel.ui.map.components.MarkerFilterState
+import com.example.guardianangel.ui.map.components.SelectedMapFeature
+import com.example.guardianangel.ui.mascot.AngelMood
 import com.example.guardianangel.ui.theme.GuardianTheme
 import com.example.guardianangel.ui.theme.SafetyLevel
 import com.example.guardianangel.ui.theme.safetyColorsFor
+import com.google.android.gms.maps.CameraUpdateFactory
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.CameraPositionState
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.MapProperties
 import com.google.maps.android.compose.MapType
@@ -86,35 +105,46 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.Polyline
 import com.google.maps.android.compose.rememberCameraPositionState
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 /**
  * Tab 2 — Map.
  *
- * Integrated with Google Maps, live US crime data markers, real device location,
- * safe haven POIs (Police, 24/7 Hospitals), and working destination search.
+ * Berkeley-first prototype integrating Google Maps, live GPS movement tracking,
+ * Angel mascot user marker, floating status bubble, Home sanctuary management,
+ * privacy-preserving crime clusters, verified safe havens, and deterministic route ranking.
  */
 @Composable
 fun MapRoute(
     routeRepository: RouteRepository,
     guardianRepository: GuardianRepository,
-    crimeDataService: CrimeDataService = CrimeDataService(),
+    crimeDataService: com.example.guardianangel.data.crime.CrimeDataService? = null,
     locationTracker: LocationTracker? = null,
     permissionProbe: PermissionProbe? = null,
+    safeLocationRepository: SafeLocationRepository? = null,
+    safetyDataSource: BerkeleySafetyDataSource = BerkeleySafetyDataSource(),
+    placesSearchProvider: PlacesSearchProvider? = null,
+    weatherProvider: WeatherProvider? = null,
     onJourneyStarted: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val scope = rememberCoroutineScope()
     val plan by routeRepository.observeRoutePlan()
         .collectAsStateWithLifecycle(initialValue = emptyPlan())
-    val destinations by routeRepository.observeQuickDestinations()
+    val quickDestinations by routeRepository.observeQuickDestinations()
+        .collectAsStateWithLifecycle(initialValue = emptyList())
+    val homeLocation by (safeLocationRepository?.observeHome() ?: flowOf(null))
+        .collectAsStateWithLifecycle(initialValue = null)
+    val safeLocations by (safeLocationRepository?.observeLocations() ?: flowOf(emptyList()))
         .collectAsStateWithLifecycle(initialValue = emptyList())
 
     var hasLocationPermission by remember {
         mutableStateOf(locationTracker?.hasLocationPermission() ?: false)
     }
 
-    var currentLocation by remember { mutableStateOf<GeoPoint?>(null) }
+    var userLocationSnapshot by remember { mutableStateOf<UserLocationSnapshot?>(null) }
+    val currentLocation = userLocationSnapshot?.point
 
     val locationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -122,16 +152,16 @@ fun MapRoute(
         hasLocationPermission = granted
         if (granted && locationTracker != null) {
             scope.launch {
-                currentLocation = locationTracker.getCurrentLocation()
+                val loc = locationTracker.getCurrentLocation()
+                if (loc != null) {
+                    userLocationSnapshot = UserLocationSnapshot(point = loc)
+                    routeRepository.updateOrigin(loc)
+                }
             }
         }
     }
 
-    // Re-read on resume, not just from the launcher callback.
-    //
-    // Location can be granted somewhere else entirely — the onboarding step, the home
-    // setup card, or system settings after a permanent denial — and this screen would
-    // otherwise keep showing "turn on location" over a permission that is already on.
+    // Refresh permissions on resume
     val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner, locationTracker, permissionProbe) {
         val observer = LifecycleEventObserver { _, event ->
@@ -144,26 +174,59 @@ fun MapRoute(
         lifecycleOwner.lifecycle.addObserver(observer)
     }
 
-    LaunchedEffect(hasLocationPermission) {
+    // Stream live location updates
+    LaunchedEffect(hasLocationPermission, locationTracker) {
         if (hasLocationPermission && locationTracker != null) {
-            currentLocation = locationTracker.getCurrentLocation()
+            locationTracker.observeUserLocation().collect { snapshot ->
+                userLocationSnapshot = snapshot
+                routeRepository.updateOrigin(snapshot.point)
+            }
         }
     }
 
     val safeHavens = remember(currentLocation) {
-        crimeDataService.getNearbySafeHavens(currentLocation ?: GeoPoint(37.7765, -122.4168))
+        if (currentLocation != null) {
+            safetyDataSource.getNearbySafeHavens(currentLocation, maxDistanceMeters = 3000.0)
+        } else {
+            safetyDataSource.getAllSafeHavens()
+        }
     }
-    val hazards = remember(currentLocation) {
-        crimeDataService.getNearbyHazards(currentLocation ?: GeoPoint(37.7765, -122.4168))
+
+    val crimeCells = remember(currentLocation) {
+        if (currentLocation != null) {
+            safetyDataSource.getNearbyCrimeCells(currentLocation, maxDistanceMeters = 3000.0)
+        } else {
+            safetyDataSource.getAllCrimeCells()
+        }
+    }
+
+    // Derive central safety state
+    val resolvedState = remember(currentLocation, homeLocation, safeLocations, plan) {
+        GuardianSafetyStateResolver.resolve(
+            currentLocation = currentLocation,
+            home = homeLocation,
+            safeLocations = safeLocations,
+            isArmed = true,
+            isRecording = false,
+            inDuress = false,
+            activeNavigationDestination = plan.destination,
+            environmentalScore = plan.recommended?.safetyScore,
+            dataConfidence = plan.recommended?.assessment?.confidence ?: DataConfidence.High,
+        )
     }
 
     MapScreen(
         plan = plan,
-        quickDestinations = destinations,
+        quickDestinations = quickDestinations,
+        homeLocation = homeLocation,
+        safeLocations = safeLocations,
         currentLocation = currentLocation,
+        userLocationSnapshot = userLocationSnapshot,
         hasLocationPermission = hasLocationPermission,
         safeHavens = safeHavens,
-        hazards = hazards,
+        crimeCells = crimeCells,
+        resolvedState = resolvedState,
+        placesSearchProvider = placesSearchProvider,
         onRequestLocation = {
             locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
         },
@@ -175,6 +238,31 @@ fun MapRoute(
         },
         onClearDestination = { scope.launch { routeRepository.clearDestination() } },
         onPreferenceChange = { scope.launch { routeRepository.setPreference(it) } },
+        onSaveHome = { name, point, address, radius ->
+            scope.launch {
+                safeLocationRepository?.setHome(name, point, address, radius)
+            }
+        },
+        onRemoveHome = {
+            scope.launch {
+                homeLocation?.id?.let { safeLocationRepository?.removeSafeLocation(it) }
+            }
+        },
+        onNavigateHome = {
+            if (homeLocation != null) {
+                scope.launch {
+                    val homeDest = Destination(
+                        id = homeLocation!!.id,
+                        name = homeLocation!!.name,
+                        address = homeLocation!!.address.ifBlank { "Designated Sanctuary Base" },
+                        point = homeLocation!!.point,
+                        walkingMinutes = 12,
+                        isSafeHaven = true,
+                    )
+                    routeRepository.selectCustomDestination(homeDest)
+                }
+            }
+        },
         onWalk = {
             scope.launch {
                 guardianRepository.armGuardian()
@@ -186,59 +274,210 @@ fun MapRoute(
 }
 
 private fun emptyPlan() = RoutePlan(
-    origin = RouteSamples.home,
+    origin = Destination("default-origin", "Current Location", "Downtown Berkeley", GeoPoint(37.8715, -122.2730)),
     destination = null,
     preference = RoutePreference.Safest,
     routes = emptyList(),
     isNightPatrolActive = true,
-    areaIlluminationPercent = 95,
+    areaIlluminationPercent = 92,
 )
 
 @Composable
 fun MapScreen(
     plan: RoutePlan,
     quickDestinations: List<Destination>,
-    currentLocation: GeoPoint? = null,
-    hasLocationPermission: Boolean = true,
-    safeHavens: List<SafeHavenPoi> = emptyList(),
-    hazards: List<CrimeHazardPoi> = emptyList(),
-    onRequestLocation: () -> Unit = {},
+    homeLocation: SafeLocation?,
+    safeLocations: List<SafeLocation>,
+    currentLocation: GeoPoint?,
+    userLocationSnapshot: UserLocationSnapshot?,
+    hasLocationPermission: Boolean,
+    safeHavens: List<SafeHavenPoi>,
+    crimeCells: List<CrimeCell>,
+    resolvedState: com.example.guardianangel.domain.ResolvedSafetyState,
+    placesSearchProvider: PlacesSearchProvider?,
+    onRequestLocation: () -> Unit,
     onSelectDestination: (String) -> Unit,
-    onSelectCustomDestination: (Destination) -> Unit = {},
+    onSelectCustomDestination: (Destination) -> Unit,
     onClearDestination: () -> Unit,
     onPreferenceChange: (RoutePreference) -> Unit,
+    onSaveHome: (String, GeoPoint, String, Float) -> Unit,
+    onRemoveHome: () -> Unit,
+    onNavigateHome: () -> Unit,
     onWalk: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val planning = plan.destination != null
-    var useGoogleMaps by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
-    var isSearchActive by remember { mutableStateOf(false) }
+    var searchPredictions by remember { mutableStateOf<List<PlacePrediction>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+
+    var followMode by remember { mutableStateOf(true) }
+    var showLegendDialog by remember { mutableStateOf(false) }
+    var showHomeDialog by remember { mutableStateOf(false) }
+    var selectedFeature by remember { mutableStateOf<SelectedMapFeature?>(null) }
+    var filterState by remember { mutableStateOf(MarkerFilterState()) }
+    var statusBubbleDismissed by remember { mutableStateOf(false) }
+
+    val scope = rememberCoroutineScope()
+
+    // Default map center: user position or downtown Berkeley
+    val defaultCenter = currentLocation ?: GeoPoint(37.8715, -122.2730)
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(
+            LatLng(defaultCenter.latitude, defaultCenter.longitude),
+            14.6f
+        )
+    }
+
+    // Camera follow mode: smoothly center camera when followMode is active
+    LaunchedEffect(currentLocation, followMode) {
+        if (followMode && currentLocation != null) {
+            cameraPositionState.animate(
+                CameraUpdateFactory.newLatLng(LatLng(currentLocation.latitude, currentLocation.longitude))
+            )
+        }
+    }
+
+    // Detect user manual camera movement to pause followMode
+    LaunchedEffect(cameraPositionState) {
+        snapshotFlow { cameraPositionState.isMoving }
+            .collect { isMoving ->
+                if (isMoving && cameraPositionState.cameraMoveStartedReason == com.google.maps.android.compose.CameraMoveStartedReason.GESTURE) {
+                    followMode = false
+                }
+            }
+    }
+
+    // Debounced destination search
+    LaunchedEffect(searchQuery) {
+        if (searchQuery.isNotBlank() && placesSearchProvider != null) {
+            isSearching = true
+            searchPredictions = placesSearchProvider.searchPredictions(searchQuery)
+        } else {
+            searchPredictions = emptyList()
+            isSearching = false
+        }
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(GuardianTheme.colors.canvas),
     ) {
-        // --- Map View Container ----------------------------------------------------
-        if (useGoogleMaps) {
-            GoogleMapsView(
-                currentLocation = currentLocation,
-                hasLocationPermission = hasLocationPermission,
-                routes = plan.routes,
-                safeHavens = safeHavens,
-                hazards = hazards,
-                modifier = Modifier.fillMaxSize(),
-            )
-        } else {
-            RouteCanvas(
-                routes = plan.routes,
-                showGeofence = !planning,
-                modifier = Modifier.fillMaxSize(),
-            )
+        // --- 1. Real Google Map View -----------------------------------------------
+        GoogleMap(
+            modifier = Modifier.fillMaxSize(),
+            cameraPositionState = cameraPositionState,
+            uiSettings = MapUiSettings(
+                zoomControlsEnabled = false,
+                myLocationButtonEnabled = false, // We use Angel mascot instead
+                mapToolbarEnabled = false,
+                compassEnabled = true,
+            ),
+            properties = MapProperties(
+                mapType = MapType.NORMAL,
+                isMyLocationEnabled = false,
+            ),
+            onMapLongClick = { latLng ->
+                // Long press opens Home configuration for tapped coordinate
+                showHomeDialog = true
+            },
+        ) {
+            // Live Angel Mascot Marker
+            if (currentLocation != null) {
+                val angelBitmap = AngelMarkerRenderer.getMarkerBitmapDescriptor(resolvedState.mood)
+                Marker(
+                    state = rememberMarkerState(currentLocation.latitude, currentLocation.longitude),
+                    icon = angelBitmap,
+                    title = "Angel",
+                    snippet = resolvedState.heroHeadline,
+                    onClick = {
+                        statusBubbleDismissed = false
+                        true
+                    },
+                )
+            }
+
+            // Home Base Marker
+            if (homeLocation != null) {
+                Marker(
+                    state = rememberMarkerState(homeLocation.point.latitude, homeLocation.point.longitude),
+                    title = "🏡 ${homeLocation.name}",
+                    snippet = "Designated Sanctuary Base (Score 100%)",
+                    onClick = {
+                        selectedFeature = SelectedMapFeature.HomeFeature(homeLocation)
+                        true
+                    },
+                )
+            }
+
+            // Additional Safe Locations
+            safeLocations.filterNot { it.isHome }.forEach { safeLoc ->
+                Marker(
+                    state = rememberMarkerState(safeLoc.point.latitude, safeLoc.point.longitude),
+                    title = "🛡️ ${safeLoc.name}",
+                    snippet = "Saved Safe Location (${safeLoc.radiusMeters.toInt()}m)",
+                    onClick = {
+                        selectedFeature = SelectedMapFeature.HomeFeature(safeLoc)
+                        true
+                    },
+                )
+            }
+
+            // Safe Haven Markers (Police, Hospitals, Fire, SafeStops)
+            if (filterState.showSafeHavens) {
+                safeHavens.forEach { haven ->
+                    Marker(
+                        state = rememberMarkerState(haven.location.latitude, haven.location.longitude),
+                        title = "🛡️ ${haven.name}",
+                        snippet = "${haven.openHoursDescription} · ${haven.address}",
+                        onClick = {
+                            selectedFeature = SelectedMapFeature.Haven(haven)
+                            true
+                        },
+                    )
+                }
+            }
+
+            // Privacy-preserving Crime Cluster Markers (150m grid cells)
+            if (filterState.showCrimeClusters) {
+                crimeCells.forEach { cell ->
+                    Marker(
+                        state = rememberMarkerState(cell.center.latitude, cell.center.longitude),
+                        title = "⚠️ Reported Incidents (${cell.incidentCount})",
+                        snippet = "${cell.primaryOffense.displayName} · ${cell.jurisdiction}",
+                        onClick = {
+                            selectedFeature = SelectedMapFeature.Hazard(cell)
+                            true
+                        },
+                    )
+                }
+            }
+
+            // Destination Pin
+            if (plan.destination != null) {
+                Marker(
+                    state = rememberMarkerState(plan.destination.point.latitude, plan.destination.point.longitude),
+                    title = "📍 ${plan.destination.name}",
+                    snippet = plan.destination.address,
+                )
+            }
+
+            // Route Polylines
+            plan.routes.forEach { r ->
+                if (r.path.isNotEmpty()) {
+                    val pts = r.path.map { LatLng(it.latitude, it.longitude) }
+                    Polyline(
+                        points = pts,
+                        color = if (r.isRecommended) Color(0xFFE57373) else Color(0xFFFFB74D),
+                        width = if (r.isRecommended) 16f else 10f,
+                        zIndex = if (r.isRecommended) 2f else 1f,
+                    )
+                }
+            }
         }
 
-        // --- Floating top controls -------------------------------------------------
+        // --- 2. Top Floating Controls ----------------------------------------------
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -246,204 +485,206 @@ fun MapScreen(
                 .padding(GuardianTheme.spacing.md),
             verticalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
         ) {
-            // Location Permission Alert Banner if missing
+            // Location Permission Alert Banner
             if (!hasLocationPermission) {
                 LocationPermissionBanner(onRequestLocation = onRequestLocation)
             }
 
-            if (planning) {
-                DestinationBar(
-                    destination = plan.destination!!,
-                    onClear = onClearDestination,
-                )
-                PreferenceChips(
-                    selected = plan.preference,
-                    onSelect = onPreferenceChange,
-                )
-            } else {
+            // Destination Search Bar
+            if (!planning) {
                 InteractiveSearchBar(
                     query = searchQuery,
-                    onQueryChange = {
-                        searchQuery = it
-                        isSearchActive = it.isNotBlank()
+                    onQueryChange = { searchQuery = it },
+                    onClear = {
+                        searchQuery = ""
+                        searchPredictions = emptyList()
                     },
-                    onSearchActiveChange = { isSearchActive = it },
                 )
 
-                // Search Autocomplete Suggestions Dropdown
-                if (isSearchActive && searchQuery.isNotBlank()) {
-                    val filtered = quickDestinations.filter {
-                        it.name.contains(searchQuery, ignoreCase = true) ||
-                                it.address.contains(searchQuery, ignoreCase = true)
-                    }
-                    SearchSuggestionsDropdown(
-                        query = searchQuery,
-                        suggestions = filtered,
-                        onSelectDestination = { dest ->
-                            searchQuery = ""
-                            isSearchActive = false
-                            onSelectCustomDestination(dest)
+                // Places Autocomplete Predictions Dropdown
+                if (searchPredictions.isNotEmpty()) {
+                    SearchPredictionsDropdown(
+                        predictions = searchPredictions,
+                        onSelectPrediction = { pred ->
+                            scope.launch {
+                                val dest = placesSearchProvider?.fetchPlaceDetails(pred.placeId)
+                                    ?: Destination(
+                                        id = pred.placeId,
+                                        name = pred.primaryText,
+                                        address = pred.secondaryText,
+                                        point = GeoPoint(37.8715, -122.2730),
+                                        walkingMinutes = 12,
+                                    )
+                                onSelectCustomDestination(dest)
+                                searchQuery = ""
+                                searchPredictions = emptyList()
+                            }
                         },
                     )
                 }
 
-                QuickDestinations(
+                // Quick Destinations Row
+                QuickDestinationsRow(
                     destinations = quickDestinations,
                     onSelect = onSelectDestination,
                 )
-            }
-        }
-
-        // --- Floating Map Mode & Telemetry Pills -----------------------------------
-        Column(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(GuardianTheme.spacing.md),
-            verticalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
-        ) {
-            // Map Style Toggle Pill
-            TonalPill(
-                text = if (useGoogleMaps) "Google Maps" else "Stylized Radar",
-                icon = GuardianIcons.Beacon,
-                container = GuardianTheme.materialColors.surfaceContainerLowest,
-                content = GuardianTheme.materialColors.primary,
-                modifier = Modifier
-                    .clip(GuardianTheme.shapes.pill)
-                    .clickable { useGoogleMaps = !useGoogleMaps }
-                    .padding(vertical = 4.dp),
-            )
-
-            if (plan.isNightPatrolActive) {
-                TonalPill(
-                    text = "Night patrol active",
-                    icon = GuardianIcons.Moon,
-                    container = GuardianTheme.materialColors.surfaceContainerLowest,
-                    content = GuardianTheme.materialColors.onSurface,
+            } else {
+                DestinationBar(
+                    destination = plan.destination!!,
+                    onClear = onClearDestination,
                 )
             }
-            TonalPill(
-                text = "${plan.areaIlluminationPercent}% illumination",
-                icon = GuardianIcons.Sun,
-                container = GuardianTheme.materialColors.surfaceContainerLowest,
-                content = GuardianTheme.materialColors.onSurface,
-            )
-            TonalPill(
-                text = "${safeHavens.size} safe havens",
-                icon = GuardianIcons.Shield,
-                container = GuardianTheme.materialColors.surfaceContainerLowest,
-                content = GuardianTheme.materialColors.onSurface,
+
+            // Status Pills & Quick Actions Row
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.xs),
+            ) {
+                // Map Layers & Legend Toggle
+                TonalPill(
+                    text = "Legend & Layers",
+                    icon = GuardianIcons.Eye,
+                    container = GuardianTheme.materialColors.surfaceContainerLowest,
+                    content = GuardianTheme.materialColors.primary,
+                    modifier = Modifier
+                        .clickable { showLegendDialog = true }
+                        .padding(vertical = 2.dp),
+                )
+
+                // Navigate Home or Set Home shortcut
+                if (homeLocation != null) {
+                    TonalPill(
+                        text = "Navigate Home",
+                        icon = GuardianIcons.Moon,
+                        container = GuardianTheme.materialColors.surfaceContainerLowest,
+                        content = GuardianTheme.materialColors.primary,
+                        modifier = Modifier
+                            .clickable(onClick = onNavigateHome)
+                            .padding(vertical = 2.dp),
+                    )
+                } else {
+                    TonalPill(
+                        text = "Set Home Base",
+                        icon = GuardianIcons.Plus,
+                        container = GuardianTheme.materialColors.surfaceContainerLowest,
+                        content = GuardianTheme.materialColors.onSurface,
+                        modifier = Modifier
+                            .clickable { showHomeDialog = true }
+                            .padding(vertical = 2.dp),
+                    )
+                }
+
+                // Illumination metric
+                TonalPill(
+                    text = "${plan.areaIlluminationPercent}% lighting",
+                    icon = GuardianIcons.Sun,
+                    container = GuardianTheme.materialColors.surfaceContainerLowest,
+                    content = GuardianTheme.materialColors.onSurface,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+
+                // Safe havens metric
+                TonalPill(
+                    text = "${safeHavens.size} havens",
+                    icon = GuardianIcons.Shield,
+                    container = GuardianTheme.materialColors.surfaceContainerLowest,
+                    content = GuardianTheme.materialColors.onSurface,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+            }
+
+            // Floating Angel Text Status Bubble
+            AngelStatusBubble(
+                message = resolvedState.statusBubbleMessage,
+                category = resolvedState.statusCategory,
+                mood = resolvedState.mood,
+                visible = !statusBubbleDismissed,
+                onDismiss = { statusBubbleDismissed = true },
+                modifier = Modifier.padding(top = 4.dp),
             )
         }
 
-        // --- Bottom sheet with Route Recommendations ------------------------------
+        // --- 3. Recenter & Follow Mode Floating Button -----------------------------
+        FloatingActionButton(
+            onClick = {
+                followMode = true
+                if (currentLocation != null) {
+                    scope.launch {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(currentLocation.latitude, currentLocation.longitude),
+                                15.5f
+                            )
+                        )
+                    }
+                }
+            },
+            containerColor = if (followMode) GuardianTheme.materialColors.primaryContainer else GuardianTheme.materialColors.surfaceContainerLowest,
+            contentColor = if (followMode) GuardianTheme.materialColors.onPrimaryContainer else GuardianTheme.materialColors.primary,
+            elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = if (planning) 240.dp else 100.dp, end = 16.dp)
+                .size(48.dp)
+                .semantics {
+                    contentDescription = if (followMode) "Camera following user" else "Recenter camera on user"
+                },
+        ) {
+            Icon(
+                imageVector = if (followMode) GuardianIcons.Walk else GuardianIcons.MapPin,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+
+        // --- 4. Route Sheet (Multiple Walking Alternatives) -----------------------
         AnimatedVisibility(
             visible = planning,
             enter = fadeIn() + slideInVertically { it / 2 },
             exit = fadeOut() + slideOutVertically { it / 2 },
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
-            RouteSheet(
-                recommended = plan.recommended,
-                alternative = plan.alternative,
+            RouteAlternativesSheet(
+                routes = plan.routes,
+                selectedPreference = plan.preference,
+                onSelectPreference = onPreferenceChange,
                 onWalk = onWalk,
             )
         }
-    }
-}
 
-@Composable
-private fun GoogleMapsView(
-    currentLocation: GeoPoint?,
-    hasLocationPermission: Boolean,
-    routes: List<SafeRoute>,
-    safeHavens: List<SafeHavenPoi>,
-    hazards: List<CrimeHazardPoi>,
-    modifier: Modifier = Modifier,
-) {
-    val defaultCenter = currentLocation ?: GeoPoint(37.7765, -122.4168)
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(
-            LatLng(defaultCenter.latitude, defaultCenter.longitude),
-            14.2f
-        )
-    }
+        // --- 5. Selected Feature Detail Sheet --------------------------------------
+        selectedFeature?.let { feat ->
+            MarkerDetailSheet(
+                feature = feat,
+                onDismiss = { selectedFeature = null },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        }
 
-    LaunchedEffect(currentLocation) {
-        currentLocation?.let {
-            cameraPositionState.position = CameraPosition.fromLatLngZoom(
-                LatLng(it.latitude, it.longitude),
-                14.5f
+        // --- 6. Home Configuration Dialog ------------------------------------------
+        if (showHomeDialog) {
+            HomeConfigDialog(
+                currentHome = homeLocation,
+                currentLocation = currentLocation,
+                onSaveHome = onSaveHome,
+                onRemoveHome = onRemoveHome,
+                onDismiss = { showHomeDialog = false },
+                modifier = Modifier.align(Alignment.Center),
+            )
+        }
+
+        // --- 7. Map Legend & Filter Controls Dialog -------------------------------
+        if (showLegendDialog) {
+            MapLegendAndFiltersDialog(
+                filters = filterState,
+                onFilterChange = { filterState = it },
+                onDismiss = { showLegendDialog = false },
+                modifier = Modifier.align(Alignment.Center),
             )
         }
     }
-
-    Box(modifier = modifier) {
-        GoogleMap(
-            modifier = Modifier.fillMaxSize(),
-            cameraPositionState = cameraPositionState,
-            uiSettings = MapUiSettings(
-                zoomControlsEnabled = false,
-                myLocationButtonEnabled = hasLocationPermission,
-                mapToolbarEnabled = true,
-                compassEnabled = true,
-            ),
-            properties = MapProperties(
-                mapType = MapType.NORMAL,
-                isMyLocationEnabled = hasLocationPermission,
-            ),
-        ) {
-            // User current location marker
-            currentLocation?.let { loc ->
-                Marker(
-                    state = rememberMarkerState(loc.latitude, loc.longitude),
-                    title = "Your Location",
-                    snippet = "Angel is active and guarding your perimeter",
-                )
-            }
-
-            // Safe Havens (Police, 24/7 Hospital, Fire, Safe Stops)
-            safeHavens.forEach { haven ->
-                Marker(
-                    state = rememberMarkerState(
-                        haven.location.latitude,
-                        haven.location.longitude,
-                    ),
-                    title = "🛡️ ${haven.name}",
-                    snippet = "${haven.openHoursDescription} · ${haven.address}",
-                )
-            }
-
-            // Crime Hazards based on UCR and local open data
-            hazards.forEach { haz ->
-                Marker(
-                    state = rememberMarkerState(haz.location.latitude, haz.location.longitude),
-                    title = "⚠️ ${haz.label}",
-                    snippet = "${haz.hazardType} (${haz.reportedRecency})",
-                )
-            }
-
-            // Route Polylines
-            routes.forEach { r ->
-                if (r.path.isNotEmpty()) {
-                    val pts = r.path.map { LatLng(it.latitude, it.longitude) }
-                    Polyline(
-                        points = pts,
-                        color = if (r.isRecommended) Color(0xFFE57373) else Color(0xFFFFB74D),
-                        width = if (r.isRecommended) 16f else 10f,
-                    )
-                }
-            }
-        }
-    }
 }
 
-/**
- * A [MarkerState] that survives recomposition.
- *
- * `MarkerState(position = …)` built inline is a new state object on every recomposition,
- * so the marker never retains anything and lint rejects it. Keyed on the coordinates, so
- * a marker that genuinely moves still gets fresh state.
- */
 @Composable
 private fun rememberMarkerState(latitude: Double, longitude: Double): MarkerState =
     remember(latitude, longitude) { MarkerState(position = LatLng(latitude, longitude)) }
@@ -479,7 +720,7 @@ private fun LocationPermissionBanner(
                     color = GuardianTheme.materialColors.onSurface,
                 )
                 Text(
-                    text = "Enable to show live position, safe havens, and crime markers.",
+                    text = "Enable location to display live movement, safe havens, and crime markers.",
                     style = GuardianTheme.type.bodySm,
                     color = GuardianTheme.materialColors.onSurfaceVariant,
                 )
@@ -497,7 +738,7 @@ private fun LocationPermissionBanner(
 private fun InteractiveSearchBar(
     query: String,
     onQueryChange: (String) -> Unit,
-    onSearchActiveChange: (Boolean) -> Unit,
+    onClear: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -506,7 +747,7 @@ private fun InteractiveSearchBar(
             .clip(GuardianTheme.shapes.pill)
             .background(GuardianTheme.materialColors.surfaceContainerLowest)
             .border(1.dp, GuardianTheme.colors.borderDefault, GuardianTheme.shapes.pill)
-            .padding(horizontal = GuardianTheme.spacing.md, vertical = 12.dp),
+            .padding(horizontal = GuardianTheme.spacing.md, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
     ) {
@@ -520,7 +761,7 @@ private fun InteractiveSearchBar(
         Box(modifier = Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
-                    text = "Where are we going? (e.g. Work, Trader Joe's)",
+                    text = "Search Berkeley addresses, campus, or shops",
                     style = GuardianTheme.type.bodyMd,
                     color = GuardianTheme.colors.iconMuted,
                 )
@@ -539,13 +780,7 @@ private fun InteractiveSearchBar(
         }
 
         if (query.isNotEmpty()) {
-            IconButton(
-                onClick = {
-                    onQueryChange("")
-                    onSearchActiveChange(false)
-                },
-                modifier = Modifier.size(20.dp),
-            ) {
+            IconButton(onClick = onClear, modifier = Modifier.size(20.dp)) {
                 Icon(
                     imageVector = GuardianIcons.Close,
                     contentDescription = "Clear search",
@@ -558,16 +793,13 @@ private fun InteractiveSearchBar(
 }
 
 @Composable
-private fun SearchSuggestionsDropdown(
-    query: String,
-    suggestions: List<Destination>,
-    onSelectDestination: (Destination) -> Unit,
+private fun SearchPredictionsDropdown(
+    predictions: List<PlacePrediction>,
+    onSelectPrediction: (PlacePrediction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = GuardianTheme.materialColors.surfaceContainerLowest
@@ -575,69 +807,31 @@ private fun SearchSuggestionsDropdown(
         elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, GuardianTheme.colors.borderEmphasis),
     ) {
-        Column(modifier = Modifier.padding(vertical = GuardianTheme.spacing.xs)) {
-            if (suggestions.isEmpty()) {
+        LazyColumn(modifier = Modifier.padding(vertical = 4.dp)) {
+            items(predictions.take(5)) { pred ->
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable {
-                            onSelectDestination(
-                                Destination(
-                                    id = "custom-${System.currentTimeMillis()}",
-                                    name = query,
-                                    address = "Target Location",
-                                    point = GeoPoint(37.7845, -122.4140),
-                                    walkingMinutes = 15,
-                                )
-                            )
-                        }
-                        .padding(GuardianTheme.spacing.md),
+                        .clickable { onSelectPrediction(pred) }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
                     Icon(
-                        imageVector = GuardianIcons.ArrowRight,
+                        imageVector = GuardianIcons.MapPin,
                         contentDescription = null,
                         tint = GuardianTheme.materialColors.primary,
                         modifier = Modifier.size(18.dp),
                     )
-                    Text(
-                        text = "Search route to \"$query\"",
-                        style = GuardianTheme.type.labelMd,
-                        color = GuardianTheme.materialColors.onSurface,
-                    )
-                }
-            } else {
-                suggestions.forEach { dest ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onSelectDestination(dest) }
-                            .padding(horizontal = GuardianTheme.spacing.md, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
-                    ) {
-                        Icon(
-                            imageVector = if (dest.isSafeHaven) GuardianIcons.Shield else GuardianIcons.MapPin,
-                            contentDescription = null,
-                            tint = if (dest.isSafeHaven) GuardianTheme.materialColors.primary else GuardianTheme.colors.iconMuted,
-                            modifier = Modifier.size(18.dp),
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = pred.primaryText,
+                            style = GuardianTheme.type.labelMd,
+                            color = GuardianTheme.materialColors.onSurface,
                         )
-                        Column(modifier = Modifier.weight(1f)) {
+                        if (pred.secondaryText.isNotBlank()) {
                             Text(
-                                text = dest.name,
-                                style = GuardianTheme.type.labelMd,
-                                color = GuardianTheme.materialColors.onSurface,
-                            )
-                            Text(
-                                text = dest.address,
-                                style = GuardianTheme.type.labelSm,
-                                color = GuardianTheme.materialColors.onSurfaceVariant,
-                            )
-                        }
-                        dest.walkingMinutes?.let { mins ->
-                            Text(
-                                text = "${mins}m",
+                                text = pred.secondaryText,
                                 style = GuardianTheme.type.labelSm,
                                 color = GuardianTheme.materialColors.onSurfaceVariant,
                             )
@@ -645,6 +839,30 @@ private fun SearchSuggestionsDropdown(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun QuickDestinationsRow(
+    destinations: List<Destination>,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
+    ) {
+        destinations.forEach { destination ->
+            TonalPill(
+                text = destination.walkingMinutes?.let { "${destination.name} · ${it}m" } ?: destination.name,
+                icon = if (destination.isSafeHaven) GuardianIcons.Shield else GuardianIcons.MapPin,
+                container = GuardianTheme.materialColors.surfaceContainerLowest,
+                content = GuardianTheme.materialColors.onSurface,
+                modifier = Modifier
+                    .clickable { onSelect(destination.id) }
+                    .padding(vertical = 2.dp),
+            )
         }
     }
 }
@@ -695,81 +913,15 @@ private fun DestinationBar(
 }
 
 @Composable
-private fun PreferenceChips(
-    selected: RoutePreference,
-    onSelect: (RoutePreference) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val options = listOf(
-        RoutePreference.Safest to ("Safest" to GuardianIcons.Shield),
-        RoutePreference.Fastest to ("Fastest" to GuardianIcons.Activity),
-        RoutePreference.WellLitOnly to ("Well lit" to GuardianIcons.Sun),
-    )
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
-    ) {
-        options.forEach { (preference, labelAndIcon) ->
-            val (label, icon) = labelAndIcon
-            val isSelected = preference == selected
-            TonalPill(
-                text = label,
-                icon = icon,
-                container = if (isSelected) {
-                    GuardianTheme.materialColors.onSurface
-                } else {
-                    GuardianTheme.materialColors.surfaceContainerLowest
-                },
-                content = if (isSelected) {
-                    GuardianTheme.colors.canvas
-                } else {
-                    GuardianTheme.materialColors.onSurface
-                },
-                modifier = Modifier
-                    .clip(GuardianTheme.shapes.pill)
-                    .clickable { onSelect(preference) }
-                    .padding(vertical = 6.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun QuickDestinations(
-    destinations: List<Destination>,
-    onSelect: (String) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier.horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm),
-    ) {
-        destinations.forEach { destination ->
-            TonalPill(
-                text = destination.walkingMinutes
-                    ?.let { "${destination.name} · ${it}m" }
-                    ?: destination.name,
-                icon = if (destination.isSafeHaven) GuardianIcons.Shield else GuardianIcons.MapPin,
-                container = GuardianTheme.materialColors.surfaceContainerLowest,
-                content = GuardianTheme.materialColors.onSurface,
-                modifier = Modifier
-                    .clip(GuardianTheme.shapes.pill)
-                    .clickable { onSelect(destination.id) }
-                    .padding(vertical = 6.dp),
-            )
-        }
-    }
-}
-
-/** The recommendation, with the faster-but-darker option available underneath. */
-@Composable
-private fun RouteSheet(
-    recommended: SafeRoute?,
-    alternative: SafeRoute?,
+private fun RouteAlternativesSheet(
+    routes: List<SafeRoute>,
+    selectedPreference: RoutePreference,
+    onSelectPreference: (RoutePreference) -> Unit,
     onWalk: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    if (recommended == null) return
+    if (routes.isEmpty()) return
+    val recommended = routes.firstOrNull { it.isRecommended } ?: routes.first()
     val palette = safetyColorsFor(SafetyLevel.fromScore(recommended.safetyScore))
 
     Column(
@@ -780,111 +932,85 @@ private fun RouteSheet(
             .clip(GuardianTheme.shapes.xl)
             .background(GuardianTheme.materialColors.surfaceContainerLowest)
             .border(1.dp, GuardianTheme.colors.borderEmphasis, GuardianTheme.shapes.xl)
-            .padding(GuardianTheme.spacing.lg),
+            .padding(GuardianTheme.spacing.md),
     ) {
+        // Preference selection tabs
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(
+                RoutePreference.Safest to "Safest",
+                RoutePreference.Fastest to "Fastest",
+                RoutePreference.WellLitOnly to "Well lit",
+            ).forEach { (pref, label) ->
+                val isSelected = pref == selectedPreference
+                TonalPill(
+                    text = label,
+                    icon = when (pref) {
+                        RoutePreference.Safest -> GuardianIcons.Shield
+                        RoutePreference.Fastest -> GuardianIcons.Activity
+                        RoutePreference.WellLitOnly -> GuardianIcons.Sun
+                    },
+                    container = if (isSelected) GuardianTheme.materialColors.primaryContainer else GuardianTheme.materialColors.surfaceContainer,
+                    content = if (isSelected) GuardianTheme.materialColors.onPrimaryContainer else GuardianTheme.materialColors.onSurface,
+                    modifier = Modifier
+                        .clickable { onSelectPreference(pref) }
+                        .padding(vertical = 2.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Recommended corridor hero header
         Row(verticalAlignment = Alignment.CenterVertically) {
             TonalPill(
-                text = "Angel's pick · ${recommended.safetyScore}%",
+                text = "Angel's recommendation · ${recommended.safetyScore}% index",
                 icon = GuardianIcons.ShieldCheck,
                 container = palette.container,
                 content = palette.onContainer,
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = "${recommended.distanceMiles} mi",
-                style = GuardianTheme.type.labelSm,
-                color = GuardianTheme.materialColors.onSurfaceVariant,
-            )
-        }
-
-        Spacer(Modifier.height(GuardianTheme.spacing.sm))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                text = "${recommended.durationMinutes}",
-                style = GuardianTheme.typography.displaySmall,
+                text = "${recommended.distanceMiles} mi · ${recommended.durationMinutes} min",
+                style = GuardianTheme.type.labelMd,
                 color = GuardianTheme.materialColors.onSurface,
             )
-            Spacer(Modifier.size(GuardianTheme.spacing.xs))
-            Text(
-                text = "min",
-                style = GuardianTheme.type.bodyMd,
-                color = GuardianTheme.materialColors.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
         }
+
+        Spacer(Modifier.height(8.dp))
+
         Text(
             text = recommended.label,
-            style = GuardianTheme.type.bodyMd,
-            color = GuardianTheme.materialColors.onSurfaceVariant,
+            style = GuardianTheme.type.headlineMd,
+            color = GuardianTheme.materialColors.onSurface,
         )
 
+        // Highlights & Warnings
         if (recommended.highlights.isNotEmpty()) {
-            Spacer(Modifier.height(GuardianTheme.spacing.sm))
-            Row(horizontalArrangement = Arrangement.spacedBy(GuardianTheme.spacing.sm)) {
-                recommended.highlights.forEach {
-                    TonalPill(
-                        text = it,
-                        container = GuardianTheme.materialColors.surfaceContainerLow,
-                        content = GuardianTheme.materialColors.onSurfaceVariant,
-                    )
-                }
-            }
+            Text(
+                text = "Highlights: " + recommended.highlights.joinToString(" · "),
+                style = GuardianTheme.type.bodySm,
+                color = GuardianTheme.materialColors.primary,
+            )
+        }
+        if (recommended.warnings.isNotEmpty()) {
+            Text(
+                text = "Notice: " + recommended.warnings.first().label,
+                style = GuardianTheme.type.labelSm,
+                color = GuardianTheme.colors.accentWarm,
+            )
         }
 
-        Spacer(Modifier.height(GuardianTheme.spacing.md))
+        Spacer(Modifier.height(12.dp))
+
         GuardianPrimaryButton(
-            text = "Walk with Angel",
+            text = "Walk with Angel (${recommended.durationMinutes} min)",
             onClick = onWalk,
-            leadingIcon = GuardianIcons.Walk,
             modifier = Modifier.fillMaxWidth(),
-        )
-
-        if (alternative != null) {
-            Spacer(Modifier.height(GuardianTheme.spacing.sm))
-            val altPalette = safetyColorsFor(SafetyLevel.fromScore(alternative.safetyScore))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(GuardianTheme.shapes.lg)
-                    .background(GuardianTheme.materialColors.surfaceContainerLow)
-                    .padding(GuardianTheme.spacing.md),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "${alternative.label} · ${alternative.durationMinutes} min",
-                        style = GuardianTheme.type.labelMd,
-                        color = GuardianTheme.materialColors.onSurface,
-                    )
-                    alternative.warnings.firstOrNull()?.let {
-                        Text(
-                            text = it.label,
-                            style = GuardianTheme.type.labelSm,
-                            color = altPalette.accent,
-                        )
-                    }
-                }
-                TonalPill(
-                    text = "${alternative.safetyScore}%",
-                    container = altPalette.container,
-                    content = altPalette.onContainer,
-                )
-            }
-        }
-    }
-}
-
-@Preview(name = "Map · standby", showBackground = true, device = "id:pixel_8")
-@Composable
-private fun MapStandbyPreview() {
-    GuardianAngelTheme {
-        MapScreen(
-            plan = emptyPlan(),
-            quickDestinations = RouteSamples.quickDestinations,
-            onSelectDestination = {},
-            onClearDestination = {},
-            onPreferenceChange = {},
-            onWalk = {},
         )
     }
 }

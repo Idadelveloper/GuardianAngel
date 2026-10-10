@@ -18,6 +18,7 @@ import com.example.guardianangel.domain.repository.GuardianRepository
 import com.example.guardianangel.domain.repository.ListeningRepository
 import com.example.guardianangel.domain.repository.PermissionProbe
 import com.example.guardianangel.domain.repository.RouteRepository
+import com.example.guardianangel.domain.repository.SessionRecorder
 import com.example.guardianangel.domain.repository.VoiceProfileRepository
 
 /**
@@ -42,6 +43,14 @@ interface AppContainer {
     val listeningRepository: ListeningRepository
     val authRepository: AuthRepository
 
+    /**
+     * Writes the live recording to storage as it happens.
+     *
+     * On the container because the listening service has no activity to hand it
+     * anything, and because the Activity screens must read exactly what it wrote.
+     */
+    val sessionRecorder: SessionRecorder
+
     /** The enrolled voiceprint. Encrypted at rest and never uploaded. */
     val voiceProfileRepository: VoiceProfileRepository
 
@@ -59,6 +68,10 @@ interface AppContainer {
     val crimeDataService: com.example.guardianangel.data.crime.CrimeDataService
     val locationTracker: com.example.guardianangel.data.platform.LocationTracker?
     val angelOrchestrator: com.example.guardianangel.agent.AngelAgentOrchestrator
+    val safeLocationRepository: com.example.guardianangel.domain.repository.SafeLocationRepository
+    val berkeleySafetyDataSource: com.example.guardianangel.data.berkeley.BerkeleySafetyDataSource
+    val weatherProvider: com.example.guardianangel.data.weather.WeatherProvider
+    val placesSearchProvider: com.example.guardianangel.data.places.PlacesSearchProvider
 
     /** The signed-in user's id, for anything scoped to them. */
     suspend fun currentUserId(): String
@@ -102,11 +115,20 @@ class InMemoryAppContainer(
         com.example.guardianangel.data.auth.PreviewAuthRepository(startSignedIn)
     override val voiceProfileRepository: VoiceProfileRepository =
         com.example.guardianangel.data.FakeVoiceProfileRepository(enrolled = startSignedIn)
+    override val sessionRecorder: SessionRecorder =
+        com.example.guardianangel.data.NoOpSessionRecorder()
     override val permissionProbe: PermissionProbe =
         com.example.guardianangel.data.GrantedPermissions()
 
     override val crimeDataService = com.example.guardianangel.data.crime.CrimeDataService()
     override val locationTracker: com.example.guardianangel.data.platform.LocationTracker? = null
+    override val safeLocationRepository: com.example.guardianangel.domain.repository.SafeLocationRepository =
+        com.example.guardianangel.data.FakeSafeLocationRepository()
+    override val berkeleySafetyDataSource = com.example.guardianangel.data.berkeley.BerkeleySafetyDataSource()
+    override val weatherProvider: com.example.guardianangel.data.weather.WeatherProvider =
+        com.example.guardianangel.data.weather.FakeWeatherProvider()
+    override val placesSearchProvider: com.example.guardianangel.data.places.PlacesSearchProvider =
+        com.example.guardianangel.data.places.GooglePlacesSearchProvider(apiKeyProvider = { "" })
     override val angelOrchestrator = com.example.guardianangel.agent.AngelAgentOrchestrator(
         crimeDataService,
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
