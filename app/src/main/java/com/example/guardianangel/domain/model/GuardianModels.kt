@@ -33,7 +33,13 @@ enum class CodewordTier {
     /** Alerts the trusted circle with live location. */
     Danger,
 
-    /** Calls emergency services and alerts contacts. */
+    /**
+     * Alerts everyone, and rings the first guardian.
+     *
+     * **Not emergency services.** Nothing in this app dials one, and no message says one
+     * was dialled — a guardian told help is already coming is a guardian who stops
+     * calling it themselves. See `EmergencyCallPolicy`.
+     */
     Emergency,
 }
 

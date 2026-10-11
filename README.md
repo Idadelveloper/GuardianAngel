@@ -1,742 +1,109 @@
 # Guardian Angel
 
-An Android safety companion for women who find themselves alone and uneasy — walking home
-at night, meeting a stranger for the first time, stuck in a group that has started to
-feel wrong.
+**A personal safety agent for Android that runs entirely on your phone.**
 
-Guardian Angel listens for your **wake word**. Say it, and the app quietly starts
-recording and transcribing, works out from the conversation whether the situation is
-actually escalating, and — only if it is — alerts the people you chose and shares your
-location. Your **codewords**, said while it is already recording, tell it what to do.
-No fumbling for a phone, no obvious panic button, no sound.
+Say a wake word and Angel starts recording and transcribing — silently, with no sound and
+nothing on screen. She works out from what she hears whether the situation is actually
+escalating, and only then texts the people you chose, with your location. Codewords, said
+while she is already listening, tell her what to do without anyone noticing you said
+anything at all.
 
-> **Status:** the interface is complete and navigable — Angel, four tabs, the setup
-> wizard and every sub-screen. Hands-free activation **works on device**: the wake word
-> starts a recording, the voiceprint can gate it to your voice, and the recording is
-> transcribed, tagged and diarized locally. Storage and accounts are real (Room, twelve
-> tables, encrypted secrets).
->
-> The **Berkeley safest-route prototype** is now integrated: a real Google Map Compose screen,
-> live GPS location tracking with Angel mascot marker and floating status bubble, Places
-> Autocomplete destination search, Home and Safe Location configuration with geofence hysteresis
-> and Sanctuary semantics (100% score at Home), deterministic multi-factor route scoring
-> over official Berkeley BPD/UCPD spatial cells and NWS weather, and privacy-preserving markers.
-> See [Berkeley Maps Setup](docs/BERKELEY_MAPS_SETUP.md) and [Roadmap](#roadmap).
+She also tries to keep you out of trouble in the first place: a live safety score, a map
+of where incidents have actually been reported, and a route home chosen for being safe
+rather than short.
+
+No audio ever leaves the device.
+
+Demo video: 
 
 ---
 
-## Why it works this way
+## Who it is for
 
-Three constraints shaped every decision in this app:
+Women who are alone and uneasy — walking home at night, meeting someone from an app for
+the first time, stuck somewhere that has started to feel wrong.
 
-**It has to be discreet.** The whole point is getting help without visibly asking for it.
-So the trigger is a spoken word rather than a tap, alerts dispatch silently, and nothing
-flashes or chimes when the guardian activates.
+The design follows from that one audience, and from one observation: by the time you are
+*certain* something is wrong, getting your phone out is the thing you can least afford to
+do. So nothing about Angel requires looking at a screen, and nothing she does is visible
+to whoever you are with.
 
-**It has to tolerate mistakes.** Codewords are ordinary words — you will say "pineapple"
-in a normal sentence eventually. The AI evaluates context before escalating, you get a
-notification you can act on, and stopping a recording is always one tap with no
-confirmation dialog. A safety app that cries wolf gets uninstalled.
-
-**It has to stay calm.** The interface is blush white and soft rose, not red klaxons. A
-person reading this screen may already be frightened; the UI's job is to lower their
-heart rate, not raise it. The one place that rule bends is Angel's critical tier, where a
-crimson strobe is exactly the point.
+Built for women, by women.
 
 ---
 
-## Angel
+## How it works
 
-The app has a mascot. Angel is a chibi guardian who sits at the top of the home screen
-and mirrors the user's safety state — halo colour, wing posture, expression and aura all
-shift with the score. In most sessions she is the only thing the user actually reads.
+### Staying out of danger
 
-She is drawn entirely with Compose `Canvas` primitives rather than shipped as five SVGs
-or Lottie files. That buys three things the asset route could not: every tier is one
-component so the geometry cannot drift between moods, moods can cross-fade as the score
-moves, and the whole thing costs a few kilobytes of code instead of five animation
-payloads.
+- **Safety score** — a live estimate from reported crime data, time of day, street
+  lighting and how far you are from home. 100 at your own front door; it starts falling
+  the moment you leave. Presented as a band and a reason, never as a guarantee.
+- **The map** — incident clusters drawn from Berkeley PD and UCPD open data in 150 m
+  privacy cells, 24/7 safe havens, and your own saved safe places.
+- **Safest route** — pick a destination and compare corridors by safety, lighting and how
+  many safe havens are on the way, not just by how long they take.
 
-| Tier | When | How she looks |
-|---|---|---|
-| **Resting** | Mic dormant, on standby | Soft golden halo breathing at 2.5s, gentle acoustic rings |
-| **Sanctuary** | At a safe haven, or 100% | Serene 4s float, rosy cheeks, golden sparkles |
-| **Cautious** | 75–95% — evening, unfamiliar route | Amber halo tilted 3°, eyes scanning, wings tucked, one worry drop |
-| **Warning** | 50–74% — poor lighting, acoustic anomaly | Trembling, flickering orange halo, wings raised to shield, two drops |
-| **Critical** | Below 50%, or a duress trigger | Crimson strobe, red shockwaves, full enclosing wing shield, racing heartbeat |
+### Walking with you
 
-`AngelMood.fromScore(score, atSafeHaven, isArmed, inDuress)` is the single place that
-mapping lives, so every screen derives the same mood from the same inputs.
+Choose a route and tap **Walk with Angel**. Only that route stays drawn, and the search
+bar is replaced by one instruction at a time. The walk is a stored journey followed by a
+foreground service, so it keeps going when you lock the phone, pocket it or switch apps.
+When you arrive, Angel can text whoever you picked — with the time you got there — so you
+don't have to remember to.
 
-Angel is decorative by default — the card around her always says the same thing in words,
-so nothing is lost if she is not perceived.
+### When something happens
 
-## Features
+| You do this                                | Angel does this                                 |
+|--------------------------------------------|-------------------------------------------------|
+| Say your **wake word**                     | Starts recording and transcribing, silently     |
+| Say your **Caution** codeword              | Keeps a record, tells nobody                    |
+| Say your **Danger** codeword, or hold SOS  | Texts your whole circle with a live map link    |
+| Say your **Emergency** codeword            | That, and rings your first guardian             |
+| Say your **Safe** codeword                 | Cancels anything pending, sends the all-clear   |
 
-### Hands-free activation — two kinds of spoken trigger
+3
+### What you get afterwards
 
-This is the distinction the whole product rests on, and the easiest one to muddle:
+A session timeline with the transcript, labelled by speaker — including voices that are
+not yours. Sounds that speech can't capture: a scream, an impact, breaking glass. The path
+you walked, with the moments worth looking at pinned to where they happened. And a title
+and summary written once the recording closes. Yours to export, or to delete.
 
-| | **Wake word** | **Codewords** |
-|---|---|---|
-| When | Angel is on standby, nothing is recorded | Angel is already recording |
-| How many | One phrase | Four, one per escalation tier |
-| What it does | Wakes her and **starts** recording | Tells her **what to do** next |
-| How it is matched | Always-on keyword model, ~1 MB, on a battery budget | Against the live transcript, which already exists |
-| Where it is set | Onboarding step 4 · Settings → Wake word | Onboarding step 5 · Settings → Codewords |
+### The stack
 
-Getting this wrong is dangerous rather than merely confusing: a user who thinks her
-danger codeword wakes the app would say it into a phone that is not listening and assume
-help was coming. Onboarding therefore teaches the wake word *first*, on its own screen,
-with both kinds laid out side by side before a single codeword is set.
+Everything that listens runs locally.
 
-#### The four codeword tiers
-
-Said while Angel is recording. She weighs what she hears against the tier you invoked
-before acting.
-
-| Tier | What saying it does |
-|---|---|
-| **Safe** | Tells chosen contacts you're okay — cancels a false alarm |
-| **Caution** | Starts transcribing quietly. Nobody is notified |
-| **Danger** | Alerts your trusted circle with your live location |
-| **Emergency** | Calls emergency services *and* alerts your circle |
-
-#### What Android actually allows
-
-Hands-free listening is shaped by platform rules more than by product preference, so the
-app states them plainly rather than implying capabilities it cannot have:
-
-- `RECORD_AUDIO` is a **while-in-use** permission. Listening with the phone pocketed
-  requires a foreground service typed `microphone`, which from Android 14 also needs
-  `FOREGROUND_SERVICE_MICROPHONE`.
-- **That service cannot be started from the background.** Not on boot, not from a
-  broadcast — Android throws `ForegroundServiceStartNotAllowedException` and there is no
-  exemption an ordinary app can rely on. **So Angel cannot arm herself.** You arm her
-  from the home screen before you set off.
-- Once armed legally from a visible screen, she **keeps listening with the app closed and
-  the screen locked**. That is exactly what the `microphone` service type is for, and it
-  is what makes the real scenario work: arm before you walk home, then never touch the
-  phone again.
-- A persistent notification is mandatory while the microphone is held. For an app
-  listening to someone's surroundings that is the right thing to show anyway.
-- True always-on hotword with the app closed needs `AlwaysOnHotwordDetector` and the
-  SoundTrigger HAL, which are reserved for the device's default assistant. The UI says
-  so instead of pretending otherwise.
-
-Permission state is read from the system on every status emission rather than cached, so
-a permission granted during onboarding is never asked for again on Home, and one revoked
-in system settings shows up immediately. Caching it was a real bug: every fresh process
-started by assuming nothing was granted.
-
-Nothing that is already done is asked for again. The permissions step reports what the
-system actually grants and turns its button into *Continue* once everything is there, and
-a wake word or codeword that has been saved stops being prompted for. Seeded codeword
-suggestions do **not** count as configured — a brand-new account has four of them, and
-counting rows meant the app reported setup as finished before the user had chosen
-anything.
-
-A **Not set up yet** card sits above the hands-free card whenever a capability is
-missing. Onboarding steps are all skippable, which makes this necessary rather than
-decorative — a skipped step otherwise leaves the app silently unable to do part of its
-job. It shows the single most consequential gap (no guardian beats no location beats no
-voiceprint) with one button that fixes it, and keeps the rest behind a tap.
-
-The home screen's **Hands-free** card is where this lives: it arms listening, names the
-wake word while armed, and lists any missing permission with the one action that fixes
-it. A listening feature that silently does nothing because a permission was declined is
-worse than no feature at all.
-
-### Recording & transcription
-
-When the wake word fires, the app records, transcribes, and attributes speech to separate
-voices (yours is enrolled during setup). It flags danger signals in the transcript —
-repeated refusals, raised voices, sounds that imply a struggle — and uses them, together
-with location and time of day, to decide whether to escalate.
-
-Unknown voices are transcribed and kept like any other, labelled **Unfamiliar voice** —
-isolating your voice is what the voiceprint is for, not a reason to throw away what
-anyone else said. Non-speech sounds go in too: a scream, breaking glass, a sound like an
-impact, running footsteps.
-
-When the recording stops, a separate summary agent reads the whole session and writes its
-**title, a short summary and the key moments** — the points worth jumping to, timed from
-the start. It runs after the fact precisely so it can never slow down an alert. It
-describes rather than diagnoses: "a sound like a slap or impact", never "you were
-assaulted", because this text ends up in an export someone may hand to a police officer.
-
-Every session lands in the Activity log with that summary, the peak volume, the lowest
-safety score it reached, and the full diarized timeline, pinned to where it was recorded.
-Review, export and delete all work. Annotating and bookmarking are on the roadmap.
-
-### Location Safety Score
-
-A live estimate of how likely you are to run into trouble where you are right now, shown
-on the home screen so you can avoid a bad situation rather than react to one.
-
-It is built from public crime data plus contextual factors: time of day, distance from
-your safe base, proximity to safe nodes (police stations, open businesses, friends'
-homes), street lighting, and how long you have been away from home.
-
-The score is a **probability estimate, not a guarantee**, so the UI leads with a plain
-band — Safe Haven, Moderate Vigilance, Heightened Risk, High Risk — and a one-line
-explanation, with the percentage and every contributing factor shown underneath. Colour
-runs green through amber to red, warmed to fit the palette, and is never the only signal:
-each band carries its own label and glyph.
-
-Any factor beyond the defaults (time, location, destination, crime data) must be switched
-on by hand. Demographic inputs are **opt-in only and off by default** — they can improve a
-risk estimate, but silently profiling a user by race or age is not something an app should
-do on her behalf.
-
-### Safest-route navigation
-
-The Map tab routes by safest path rather than shortest, using the same data as the score.
-Pick a destination and it compares a well-lit corridor against the faster shortcut, with
-the safety score, lighting and safe-haven count for each.
-
-**Walk with Angel** then starts a journey. Only the route you chose stays drawn, the
-search bar is replaced by one instruction at a time, and the camera follows you. Turns
-are worked out from the shape of the route, so distances and directions are real but
-street names are not available — the card says so rather than inventing one.
-
-A journey is **not screen state**. It is stored, and a foreground service keeps it alive,
-so switching tabs, locking the phone or putting it in a pocket does not stop Angel walking
-with you. Coming back to the map picks up exactly where you were. The walk ends when you
-arrive or when you tap End walk — never because you looked at something else.
-
-### Arrival, and telling someone
-
-When you pick a destination, Angel asks once whether to tell someone when you get there.
-Choose a guardian, optionally add your own message, and the moment you arrive they get a
-text with the time you arrived. Telling nobody is one tap and is the default.
-
-Arrival means **close enough and still there** — within 40 m for twenty seconds — so
-walking past the end of the street does not fire it, and a vague cell-tower fix cannot
-either. If the text could not be sent, the journey log says so instead of implying it was.
-
-### The journeys log
-
-Every walk is kept: where to, when, how long it took, how far, which route, whether you
-arrived, and whether the arrival text went out. A walk you ended early is recorded
-neutrally — plans change, and a log that reads as a reprimand is one you would switch off.
-
-### Trusted circle
-
-Up to five emergency contacts, ranked, each with a name, relationship and number. Your
-first guardian cannot be removed; an empty circle would make every other feature
-pointless.
-
-**Alerts go out by SMS.** It works on one bar with no data, needs no app on the receiving
-end, and lands on any lock screen. The text names who, where (as a tappable maps link)
-and why, quoting what was actually said rather than paraphrasing it. Sends are confirmed
-against the network, so "sent" means sent — a message still in flight is reported as
-still in flight, not as delivered.
-
-That needs `SEND_SMS`, which Android treats as a restricted permission and the app asks
-for explicitly — on the setup step where you add guardians, and from the home screen if
-it is missing. Without it, an alert opens a pre-filled composer (WhatsApp for a single
-guardian, otherwise your messaging app) and waits for one tap. The app always says which
-of the two you have.
-
-**WhatsApp cannot send on your behalf**, and no amount of engineering changes that: Meta
-offers no API for a personal account, only the Business Cloud API from a business number
-with pre-approved templates. The deep link is one tap, never zero, and nothing in the app
-describes it as sent.
-
-On the **Emergency** tier only, and only if you leave it switched on, Angel also rings
-your first guardian right after the text. Nothing in this app dials emergency services,
-and nothing in it will ever tell you it has.
+|               |                                                                       |
+|---------------|-----------------------------------------------------------------------|
+| Wake word     | sherpa-onnx keyword spotting (zipformer) — any phrase, no retraining  |
+| Your voice    | CAM++ 512-d voiceprint, AES-GCM encrypted in the Android Keystore     |
+| Transcription | Moonshine Tiny + Silero VAD, streaming, on device                     |
+| Sound events  | YAMNet via LiteRT — 521 AudioSet classes                              |
+| App           | Kotlin · Jetpack Compose · Material 3 · Room (v5, real migrations)    |
+| Map           | Google Maps Compose · fused location · BPD/UCPD open data · NWS       |
 
 ---
 
-## Screens
-
-Four tabs, a five-step setup wizard, and six stacked sub-screens — a session detail view
-plus wake word, codewords, guardians, safe places and voice calibration.
-
-### Home
-
-Two faces of one screen, chosen by whether a guarded walk is under way:
-
-| State | What it shows |
-|---|---|
-| **Sanctuary** | At a safe haven. Angel rests, the gauge is pinned at 100%, and the only prominent action is starting a walk. |
-| **Out & about** | A journey is live. Angel turns watchful, the gauge goes live with lighting and arrival tiles, and the duress trigger and check-in take over. |
-
-The safety score sits directly under Angel, above everything else, because it is the one
-number you open the app to check. The app bar's left action is **record/stop** — one tap
-starts a real recording, another stops it.
-
-Recording needs the microphone **and** location. An alert that cannot say where you are
-leaves your guardians with an emergency and no address, so the record button asks for
-whichever is missing and starts nothing until it has both.
-
-Recording cuts across both states: when a trigger fires, a recording panel expands above
-everything with an elapsed timer, live waveform, running transcript, exactly who has been
-alerted, and a full-width **Stop recording** button.
-
-The duress trigger is a **three-second hold**; stopping is one immediate tap. Those are
-deliberately asymmetric — arming dispatches a silent alert and can call police, so a
-pocket brush must not fire it, but a frightened user standing down should not face a
-confirmation dialog.
-
-### Map
-
-Standby shows the home geofence, a search bar and quick destinations. Picking one draws
-the corridors and opens a sheet comparing them. **Walk with Angel** starts the journey
-described above, on this screen.
-
-Pins are the app's own, not Google's defaults: home, saved safe places, verified safe
-havens, reported-incident clusters carrying their own count, and your destination. Angel
-herself marks where you are — she interpolates between fixes so she walks alongside you
-rather than reappearing every second, and tapping her says where you are ("You're home",
-or the safe place you are standing in).
-
-If location is off, a banner at the top offers to turn it on — the map is the screen where
-its absence is most obvious, so it is where the offer belongs.
-
-> **A real Maps API key is required.** With the placeholder key the SDK does not error; it
-> composes a map, draws the Google watermark and renders nothing. `MapsAvailability`
-> checks for a real key and falls back to drawing trails on a canvas, so a missing key
-> degrades honestly instead of showing empty boxes.
-
-### Activity
-
-A log of monitored sessions and a movement-intelligence rollup behind one segmented
-control. Each recorded session carries a **breadcrumb preview** — the path walked, drawn
-from the location points stored during the recording, with chips for distance and how
-many moments were flagged. Opening one shows the full route with a pin at every flagged
-moment: a codeword acted on, a sound the tagger caught, an unfamiliar voice, a sentence
-the reasoning tier flagged, or a sharp fall in the safety score. Tapping a pin says what
-happened there, quoting what was captured rather than paraphrasing it.
-
-The pins are worked out when the session is read, not when it is recorded, so a walk
-logged last month benefits from any later improvement to what counts as notable. Tapping a session opens the full diarized timeline — who said what when, which
-sounds the acoustic model flagged, and what Angel did about it.
-
-A third segment, **Journeys**, is the walk log: every trip with its duration, distance,
-route and outcome, and what happened to the arrival text.
-
-The design brief had the log and the analytics as separate screens. Folding them into one
-tab keeps the bottom bar at four entries and means the user does not have to remember
-which tab holds which half of the same subject.
-
-### Settings
-
-Tap your name to edit it and your number. Then a word from Angel, then the safeguard
-list. Each row reports live state in its
-subtitle, so the whole setup is auditable without opening anything. Four sub-screens
-manage the wake word, codewords, guardians and voice calibration.
-
-### Sign up & log in
-
-The app opens on an auth gate. Both screens exist, and which one you see depends on
-whether this device already has an account — a returning user sent to a sign-up form
-either makes a second account or concludes her data is gone.
-
-Once you are in, the auth screens are gone: entering the app clears the whole back stack,
-and a relaunch resumes the session rather than asking again. Logging out ends the session
-without deleting anything, so logging back in returns your guardians, codewords and wake
-word intact.
-
-Login works with no Firebase project configured. The password is salted, hashed and
-Keystore-encrypted on the device, and a wrong password and an unknown address give the
-same message — distinguishing them would confirm whether an address has an account on
-this phone.
-
-**Set up without an account** is still offered, one tap below. A woman downloading this
-at 11pm should be able to arm a panic button before she is asked for an email address;
-credentials can be added later from Settings and are linked onto the same account, so
-nothing set up first is lost.
-
-### Onboarding
-
-Permissions → voice → guardians → **wake word** → codewords. Each step is a wizard page
-with a pinned call to action and Angel explaining what she needs and why.
-
-**Every step is skippable**, and the skip link says what skipping costs rather than a
-neutral "later" — "Skip — no hands-free for now" instead of "Skip". Whatever is skipped
-resurfaces on Home as a **Not set up yet** card, because a skipped step otherwise leaves
-the app silently unable to do part of its job.
-
-Two places where the reference was simplified deliberately:
-
-- **Voice calibration** carried a countdown, a progress bar, three telemetry chips and
-  two transport controls at once. During setup that reads as a studio console; it is now
-  one prompt, one button, one progress ring. The clarity figure is real — it is how well
-  the recorded segments agreed with each other — so a noisy room reports a low number
-  rather than a reassuring one, and says plainly that voice matching will stay off until
-  it improves.
-- **Codewords** put all four tiers plus a PIN section on one page. That is a lot of
-  consequence to absorb at once and the tiers only make sense in order, so they are
-  paginated — one word, one explanation, and an example built from what you just typed.
-
-## Design system
-
-Plus Jakarta Sans throughout, on a soft blush canvas (`#FFF8F8`) with rose and apricot
-accents and a protective midnight-navy (`#1E2238`) for type and high-contrast actions —
-closer to Partiful or Luma than to a security product.
-
-Everything lives in `ui/theme/` and is consumed through two accessors: `MaterialTheme` for
-standard Material roles and `GuardianTheme` for the brand tokens Material has no slot for
-(`GuardianTheme.colors.accentSoft`, `GuardianTheme.spacing.lg`, `GuardianTheme.shapes.pill`,
-`GuardianTheme.type.labelSm`). No component hard-codes a hex value.
-
-- **Type** — Plus Jakarta Sans, bundled as five static instances cut from the upstream
-  variable font. Static rather than variable because `minSdk` is 24 while font variation
-  settings only take effect from API 26.
-- **Elevation** — ambient warm glows and tonal layering rather than hard drop shadows.
-- **Icons** — a hand-built stroke set (2px, round caps); Material's filled glyphs don't
-  match the spec.
-- **Mascot** — Angel is part of the design system, not decoration bolted on: her tier
-  colours come from the same ramp as the safety score. See [Angel](#angel).
-- **Duress** — `#D50000` carries the SOS button label at 5.48:1; the brighter `#FF1744`
-  is reserved for auras and strobes, where it never has to pass a text contrast check.
-- **Dark mode** — a warm espresso night scheme, since this app gets used after dark.
-- **Accessibility** — every on-screen colour pairing is verified against WCAG 2.1 AA by
-  `ColorContrastTest`, which fails the build if a pairing regresses. Where the design
-  document's values fell short for elements that *identify* a control (focus rings, form
-  borders, inactive nav icons), accessible siblings were added and documented in
-  `Color.kt`.
-
----
-
-## Architecture
-
-```
-di/
-  AppContainer              the object graph — the single swap point for persistence
-domain/
-  model/                    GuardianSnapshot, SafetyScore, Codeword, MonitoredSession,
-                            SafeRoute, AccountSnapshot … plain Kotlin, no Android types
-  repository/               one interface per feature area
-data/
-  local/                    Room — entities, DAOs, Room*Repository implementations
-  auth/                     anonymous, email/password and phone, Firebase or local
-  crypto/                   KeystoreCrypto — AES-GCM for the voiceprint and PIN
-  platform/                 Android implementations of domain interfaces
-  sync/                     CloudSync — opt-in backup that cannot upload transcripts
-  Fake*Repository           in-memory stand-ins, same shapes the real sources emit
-  *Samples                  sample content shared by the fakes and every @Preview
-audio/
-  SpeechPipeline            the interfaces every tier implements, and the rationale
-  AudioFeatures             log-mel + FFT front end, cosine similarity
-  SentencePieceTokenizer    typed phrase → tokens, Viterbi over the model vocabulary
-  SherpaWakeWordDetector    keyword spotting
-  SherpaTranscriber         Silero VAD + Moonshine Tiny
-  SherpaSpeakerIdentifier   CAM++ voiceprint — verification and diarization
-  VoiceEnroller             records audio, folds a running mean, reports clarity
-  YamnetAudioTagger         521 AudioSet classes via LiteRT
-  HeuristicThreatAssessor   the cheap reasoning tier
-service/
-  GuardianAudioSession      one AudioRecord, routed by phase
-  GuardianListeningService  the microphone foreground service
-ui/
-  theme/                    colour schemes, type scale, shapes, spacing, elevation,
-                            the green-to-red safety ramp
-  mascot/                   Angel — mood model, per-tier style table, canvas renderer
-  components/               buttons, cards, chips, inputs, switches, nav, scaffolds
-  icons/                    GuardianIcons — stroke-based icon set
-  navigation/               routes, tabs, and the single NavHost
-  onboarding/ home/ map/ activities/ settings/
-```
-
-### Storage and accounts
-
-Room, thirteen tables, all hanging off one `users` row — full detail in
-**[docs/DATA_AND_AUTH.md](docs/DATA_AND_AUTH.md)**. Schemas are exported to
-`app/schemas/` and checked in, so every migration is a reviewable diff.
-
-Accounts start **anonymous**: sign-in happens silently on first launch, because someone
-downloading a safety app at 11pm should be protected before she is asked for an email
-address. Real credentials are *linked onto* that account later so her guardians and
-codewords come with her. Email/password and phone are implemented and need a Firebase
-project; without `google-services.json` the app keeps a real local account and says
-plainly that multi-device restore is unavailable.
-
-Cloud backup is opt-in from Settings and uploads guardians, codewords, safe places and
-session metadata. **Transcripts, the voiceprint and the disarm PIN are never uploaded** —
-and `CloudSync` is written so it cannot start doing so by accident.
-
-### Where data will live
-
-Repositories are split by feature area rather than one god-object, so each can migrate
-independently when the database lands — contacts and codewords might move to an
-encrypted Room table first while analytics stays derived.
-
-| Repository | Owns | Storage |
-|---|---|---|
-| `AccountRepository` | profile, onboarding progress, disarm PIN | **Room + keystore** (done) |
-| `VoiceProfileRepository` | the voiceprint and its clarity | **Room, Keystore-encrypted** (done) |
-| `ContactsRepository` | the trusted circle | **Room** (done) |
-| `CodewordRepository` | the four tiers and their phrases | **Room** (done) |
-| `ListeningRepository` | wake word, enrolment count, sensitivity | **Room** (done) |
-| `AuthRepository` | who is signed in, and how | **Firebase, or local** (done) |
-| `PermissionProbe` | what the system currently grants | **the system itself** — never cached |
-| `ActivityRepository` | sessions, transcript lines, analytics rollups | *pending* — Room; analytics as a query |
-| `RouteRepository` | destinations and route planning | *pending* — Room + routing service |
-| `GuardianRepository` | the live snapshot the home screen renders | *pending* — composed from the above + sensors |
-
-The three pending rows are still in-memory fakes, so the Home snapshot is sample content.
-That is why the **Not set up yet** card reads codewords and guardians from their own Room
-repositories rather than from the snapshot — a setup card built on samples would reassure
-the user about things she has not actually set up.
-
-Secrets are represented by their *status*, never their value: `VoiceProfile` carries a
-clarity score rather than the voiceprint, and `DisarmPin` carries only whether a PIN is
-set. The real vectors belong in the hardware keystore, and keeping them out of the domain
-model means they can never reach a log, a screenshot or a backup.
-
-Screens read one snapshot and never touch a data source. `AppContainer` is constructed
-once in `GuardianAngelApp`; swapping `InMemoryAppContainer` for a persistence-backed one
-is the only change needed, and no screen or view model knows the difference.
-
-Reads are `Flow` because the data is genuinely live: the score re-evaluates as the user
-moves, contacts come online, and a session accumulates transcript lines while open.
-
-### Speech stack
-
-Sound becomes a decision through **four tiers, each only running when the one below says
-it is worth it**. Full research, benchmarks and sources: **[docs/SPEECH_STACK.md](docs/SPEECH_STACK.md)**.
-
-| Tier | Runs | Job | Budget |
-|---|---|---|---|
-| 0 · VAD | always | Is anyone speaking? | 632 KB, negligible |
-| 1 · Wake word | while armed | Should I start recording? | 13 MB fp32, few ms/window |
-| 2a · Streaming ASR | while recording | What is being said | 118 MB, RTF ≈ 0.05 |
-| 2b · Audio tagging | while recording | Scream, glass, raised voices | 3.9 MB |
-| 2c · Speaker ID | while recording | How many voices, whose | 28 MB |
-| 3 · Reasoning | on suspicion only | Is this escalating? | heuristic always, LLM rarely |
-
-**Do we need an LLM?** For detection, no — and using one would make the app worse. An
-MFCC+SVM distress classifier reaches ~95% detection at ~1% false alarm for 3–5% battery
-over ten hours; an on-device LLM costs 2–5 s to first token and ~1.2 GB of RAM. Running
-the expensive thing continuously would flatten the battery during exactly the walk home
-it exists to protect, and answer *slower*.
-
-For **judgement** on the ambiguous middle — whether *"leave me alone"* plus a stranger's
-voice plus 11 pm plus an unlit street is escalation — yes. `HeuristicThreatAssessor` runs
-on every chunk and escalates when signals are unambiguous; a language model is invoked
-only in the 0.30–0.60 severity band, over text, never over audio.
-
-**Chosen runtime: sherpa-onnx** (Apache-2.0) running **Moonshine Tiny**. It covers ASR,
-diarization, speaker ID, VAD, keyword spotting and audio tagging in one framework, which
-matters more for maintenance than any single model's WER — and the runtime choice is
-worth more than the model choice anyway: sherpa-onnx is reported 51× faster than
-whisper.cpp on the *same* Whisper Tiny on Android.
-
-**Cloud is better and we are still not using it** for the live path. AssemblyAI streams
-at 307 ms P50 / 8.14% WER for ~$0.21–0.46/hour — better than anything that fits on a
-phone. But the app's promise is that audio never leaves the device, connectivity fails
-exactly where she needs it most, and streaming someone's surroundings to a third party
-during an assault is a different threat model. Cloud is legitimate only as opt-in,
-after-the-fact re-transcription of a saved session.
-
-### What is built, and what you need to supply
-
-Tiers 0–2c run end to end on device. One `AudioRecord` feeds the wake-word spotter while
-waiting, and a detection flips the same stream into the transcriber, audio tagger and
-speaker identifier.
-
-The wake word runs on **sherpa-onnx keyword spotting** — Apache-2.0, 3.3 M parameters,
-open vocabulary, so any phrase registers at runtime with no retraining.
-`SentencePieceTokenizer` turns a typed phrase into the tokens it expects, and a phrase the
-model cannot pronounce is refused *before* it is saved rather than saving fine, looking
-set up, and never firing. Phrase detection and speaker identity stay independent: the
-spotter decides *the phrase was said*, the CAM++ voiceprint decides *she said it*.
-
-This is verified rather than assumed. Twenty instrumented tests run on a physical Pixel 7a
-and an emulator, feeding recorded speech through the real capture loop: detection fires,
-unrelated speech does not, the voice gate accepts its owner and rejects noise and silence,
-enrolment produces a usable voiceprint, re-arming after teardown works, and manual
-recording works with no wake word set. Writing those tests is what found three bugs that
-every component-level test had passed over — a tokeniser that made detection impossible,
-an embedding-length mismatch that would have rejected the enrolled user on every wake, and
-a native use-after-free on the disarm path.
-
-Two design rules fell out of that work and are worth stating:
-
-- **The voice-match toggle is a request, not the outcome.** The gate engages only when the
-  voiceprint is consistent enough to trust, because gating on a bad voiceprint does not
-  keep a stranger out — it stops Angel waking for the person she belongs to.
-- **Every speaker embedding comes from one fixed 1.5 s window.** CAM++ embeddings are only
-  comparable between inputs of similar duration; the same speech at 1 s versus 2 s scores
-  −0.03, as if two strangers.
-
-Session history is Room-backed and real. Still pending: tier 3's LLM assessor for the
-ambiguous band, and tuning thresholds against real speech — which no automated test can
-settle. The APK is 269 MB with models bundled: fine for sideloading, over Play's 150 MB
-ceiling. Checklist of what only you can do:
-**[§8 of the speech stack doc](docs/SPEECH_STACK.md#8-what-you-need-to-do)**.
-
-### Tech
-
-Kotlin · Jetpack Compose (BOM 2026.02.01, Material 3 1.4.0) · Navigation Compose 2.10.2 ·
-Coroutines + Flow · ViewModel · Room 2.8.5 (schema v5, real migrations) ·
-maps-compose 6.5.0 · LiteRT 1.4.2 · sherpa-onnx 1.13.8 ·
-`minSdk` 24, `targetSdk` 37
-
-## Building
+## Running it
 
 ```bash
 ./gradlew :app:assembleDebug              # build
-./gradlew :app:testDebugUnitTest          # 34 unit tests, including the contrast guard
-./gradlew :app:connectedDebugAndroidTest  # 20 instrumented tests, needs a device
-./gradlew :app:lintDebug                  # lint, including accessibility checks
-./gradlew :app:installDebug               # install on a connected device
+./gradlew :app:testDebugUnitTest          # 206 unit tests
+./gradlew :app:connectedDebugAndroidTest  # 58 instrumented tests, needs a device
+./gradlew :app:installDebug
 ```
 
-The instrumented suite is the one that matters for the audio path — it feeds recorded
-speech through the real capture loop and is the only suite that has ever caught a bug
-there. Run it for any change under `audio/` or `service/`.
+You need to supply a Google Maps API key — see
+[docs/BERKELEY_MAPS_SETUP.md](docs/BERKELEY_MAPS_SETUP.md). With the placeholder key the
+map renders nothing at all rather than failing, which looks like a bug and isn't.
 
-Twenty-one `@Preview` functions across seventeen files cover every screen, including all
-three home states, both map states and all five onboarding steps.
+Silent SMS needs `SEND_SMS`, which the app asks for when you add a guardian. Without it an
+alert opens a pre-filled composer and waits for one tap, and the app tells you which of
+the two you have.
 
-### Working with AI coding agents
-
-**`AGENTS.md` in the repo root is the canonical context for every agent**, and the
-per-agent files are thin pointers to it on purpose:
-
-| Agent | Reads |
-|---|---|
-| OpenAI Codex | `AGENTS.md` directly |
-| JetBrains Junie | `AGENTS.md` + `.junie/playbook.md` |
-| Gemini CLI | `GEMINI.md`, which imports `AGENTS.md` with `@./AGENTS.md` |
-| Claude Code | `.claude/skills/guardian-angel-context/`, which points at `AGENTS.md` |
-
-Keep shared facts in `AGENTS.md` alone. An earlier per-agent file carried its own copy of
-the architecture notes, drifted, and ended up directing an agent at four source files that
-no longer existed while describing a tokeniser that had been replaced. One canonical file,
-many thin pointers.
+**This is a hackathon build.** Transcripts are stored unencrypted, the wake-word
+thresholds have not been tuned against real speech in real rooms, and the APK is 269 MB
+with the models bundled. Don't put anything you'd mind losing into it yet.
 
 ---
-
-## Roadmap
-
-### Interface
-
-- [x] Design system, theme and component library
-- [x] Angel mascot — five animated tiers driven by the safety score
-- [x] Navigation: four tabs, setup wizard, stacked sub-screens
-- [x] Home — sanctuary, out & about, and recording states
-- [x] Map — real Google Maps, safest-route comparison, app-drawn pins
-- [x] Activity — session log, diarized transcript, movement insights
-- [x] Settings — hub plus wake word, codewords, guardians and voice sub-screens
-- [x] Onboarding — account, permissions, voice, guardians, wake word, codewords
-- [x] Skippable onboarding, with a **Not set up yet** card on Home that resurfaces
-      whatever was skipped and names what it costs
-- [x] Auth gate — sign up and log in, both screens, with the gate gone once passed and
-      sign-out that ends the session without deleting the account
-- [x] Local credentials so login works with no Firebase project configured
-- [x] Editable profile, and settings screens that persist what they show
-- [x] Record/stop toggle in the app bar, gated on microphone and location
-- [x] Safety score above the fold, never behind the setup cards
-- [ ] **Localise the new screens.** The theme, navigation and original Home copy live in
-      `strings.xml` (102 strings); copy added with the Angel screens is still inline in
-      the composables and needs a pass before any non-English build.
-
-### Hands-free activation
-
-- [x] Microphone foreground service, permission flow and UI
-- [x] Permission state probed from the system, never cached, so a permission granted in
-      onboarding is never asked for again
-- [x] Speech-stack architecture — tiered pipeline, all seams, heuristic reasoning tier
-- [x] sherpa-onnx integrated; ASR, wake word, VAD and speaker models in place
-- [x] Wake word on sherpa KWS — Apache-2.0, open vocabulary, phrases validated against
-      the model vocabulary before they can be saved
-- [x] Wake word wired end to end and **proven on device** — recorded speech through the
-      real capture path starts a recording; unrelated speech does not
-- [x] Speaker verification so only your voice wakes Angel — enrolment records real audio,
-      the voiceprint is CAM++ and encrypted at rest, and the gate engages only when the
-      voiceprint is consistent enough to trust
-- [x] YAMNet audio tagging — loading on device, danger classes mapped
-- [x] sherpa-backed transcriber (VAD + Moonshine) and speaker diarization
-- [x] Manual recording that depends on nothing but the microphone — no wake word, no
-      model, no notification permission
-- [x] Instrumented suite on a physical device and an emulator covering the whole path
-- [ ] Tune detection and speaker thresholds against real speech in real rooms
-- [ ] On-device codeword spotting against the live transcript
-- [ ] LLM-backed reasoning for the ambiguous 0.30–0.60 severity band
-- [ ] The accidental-trigger flow — the disarm PIN is modelled and stored, but the
-      cancel-and-stand-down journey is not built
-- [ ] APK size: move models to first-run download or Play Asset Delivery
-
-### Data
-
-- [x] Room database — thirteen tables, schema v5, exported schemas and real migrations
-- [x] Anonymous accounts, with email/password and phone linking ready for Firebase
-- [x] Opt-in cloud backup that cannot upload transcripts
-- [x] Contact picker, and real runtime permission requests in onboarding
-- [x] Domain models and repository contracts for every feature area
-- [x] Room-backed sessions, transcripts, breadcrumbs, analytics and journeys
-- [x] Transcript export, with a provenance statement, and session deletion
-- [ ] Room-back the last two repositories (guardian snapshot, routes) — the home snapshot
-      is still sample content, which is why the setup card reads live state from the
-      repositories that are real rather than from the snapshot
-- [ ] SQLCipher for the whole database, not just the credential columns
-- [ ] Transcript annotation and bookmarking
-
-### Alerting
-
-- [x] One dispatch path for the SOS hold and every codeword tier
-- [x] SMS with the location as a tappable link, quoting what was said
-- [x] Delivery confirmed against the network — `reached`, `failed`, `unconfirmed`
-- [x] `SEND_SMS` asked for where the reason is obvious, and surfaced on Home when missing
-- [x] WhatsApp / messaging-app fallback, labelled as needing a tap
-- [x] A call to the first guardian on the Emergency tier, switchable off
-- [x] Arrival text with a timestamp and an optional message of your own
-- [ ] Play Permissions Declaration for `SEND_SMS` before any release
-- [ ] Guardian-side acknowledgement, so she can see the alert was read
-
-### Route & Map Experience
-- [x] Real Google Maps Compose screen with fused location updates, follow-mode, and recenter
-- [x] Angel mascot as live user marker with mood transitions and floating text status bubble
-- [x] Destination search via Places Autocomplete (New) with Berkeley 15km bias and offline landmark catalog
-- [x] Home & Safe Location configuration (persisted to Room, geofence hysteresis, 100% Sanctuary score)
-- [x] Deterministic walking route evaluator (safest, fastest, well-lit options; BPD & UCPD crime cells, NWS weather)
-- [x] Privacy-preserving map markers (150m cell clusters, 24/7 safe havens, route hazard warnings, legend)
-- [x] Walking mode — only the chosen route drawn, turn-by-turn derived from its geometry
-- [x] Navigation that survives leaving the screen, the app and the lock screen, via a
-      location foreground service and a trip stored in Room
-- [x] Arrival detection (close enough *and* still there) and an opt-in arrival text
-- [x] Journeys log — duration, distance, route, outcome, and what happened to the text
-- [ ] User-supplied Maps API key for production deployment (documented in `docs/BERKELEY_MAPS_SETUP.md`)
-- [ ] Animate the camera to a path when it is selected, and Angel chat-bubble directions
-- [ ] Wearable companion
-
-## Privacy
-
-This app records audio and tracks location — the two most sensitive permissions a phone
-can grant. So it is worth being precise about what the current build actually does, rather
-than describing an intention.
-
-**True today:**
-
-- **Nothing is recorded until you trigger it.** While armed, roughly a second and a half
-  of audio is held in a fixed buffer and continuously overwritten so the wake word can be
-  matched against it. It is never written to disk.
-- **Audio never leaves the device.** All six tiers run locally. `CloudSync` has no code
-  path that reads the transcript tables, and its payloads are hand-written maps so a new
-  column cannot start syncing by accident.
-- **The voiceprint is a vector, not a recording**, is encrypted with a hardware-backed
-  Keystore key, and is never uploaded. The audio it was derived from is discarded as soon
-  as the vector exists.
-- **The disarm PIN is hashed and Keystore-encrypted**, never stored in the clear.
-- **Demographic factors are opt-in and off by default.** They are never inferred.
-- **Cloud backup is opt-in** and covers guardians, codewords, safe places and session
-  metadata only.
-
-**Not true yet** — do not rely on these:
-
-- **Transcript text is stored unencrypted** in Room. Only the voiceprint and the PIN are
-  encrypted; whole-database encryption (SQLCipher) is on the roadmap.
-- **Location is real now**, and so is what it enables: breadcrumbs during a recording, a
-  maps link in an alert, and a journey a foreground service follows. Granting location
-  means the app knows where you are whenever it is listening or walking with you.
-- **An arrival text is sent to a real person.** It goes only to the guardian you picked,
-  only for the journey you picked them on.
-
-Treat this as a build under active development: the privacy architecture is real, but it
-is not finished, and you should not put sensitive personal data into it yet.
